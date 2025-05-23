@@ -2,8 +2,8 @@ name: Run Product Scraper
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # هر 6 ساعت اجرا می‌شه
-  workflow_dispatch:       # دکمه اجرا دستی
+    - cron: '0 */6 * * *'  # هر 6 ساعت
+  workflow_dispatch:       # اجرا دستی
 
 jobs:
   run:
