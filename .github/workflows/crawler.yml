@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      - name: Install Playwright Browsers
+        run: playwright install
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
