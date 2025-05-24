@@ -1,20 +1,66 @@
 import asyncio
-from crawl4ai import AsyncWebCrawler, BrowserConfig
+import re
+from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
+from supabase import create_client, Client
 
-start_urls = [
-    "https://wiraa.ir/category/آرایشی-و-بهداشتی"
-]
+# تنظیمات اتصال به سوپابیس
+SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-config = BrowserConfig(
-    headless=True,
-    verbose=True
-)
+def parse_price(price_str):
+    digits = re.sub(r"[^\d]", "", price_str)
+    return int(digits) if digits else None
 
-crawler = AsyncWebCrawler(config=config)
+def parse_availability(avail_str):
+    return avail_str.strip() == "موجود"
+
+async def crawl_product(crawler, url):
+    print(f"Crawling product: {url}")
+    result = await crawler.arun(url)
+
+    # فرض کن نتایج توی result.html هست (یا result.content)
+    # باید با xpath یا css selector استخراج کنیم:
+    # این فقط یک مثال هست، باید سلکتورهای درست سایت رو بذاری
+
+    name = result.select_one("h1.product-name").text.strip() if result.select_one("h1.product-name") else ""
+    price = result.select_one(".price").text.strip() if result.select_one(".price") else ""
+    availability = result.select_one(".availability").text.strip() if result.select_one(".availability") else ""
+
+    price_num = parse_price(price)
+    available = parse_availability(availability)
+
+    data = {
+        "url": url,
+        "name": name,
+        "price": price_num,
+        "available": available,
+    }
+    print(f"Saving product: {data}")
+    supabase.table("products").upsert(data, on_conflict="url").execute()
 
 async def main():
-    for url in start_urls:
-        await crawler.arun(url)
+    config = HTTPCrawlerConfig()
+    crawler = AsyncWebCrawler(config=config)
+
+    category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
+
+    print(f"Crawling category page: {category_url}")
+    result = await crawler.arun(category_url)
+
+    # استخراج لینک‌های محصولات از صفحه دسته‌بندی
+    # مثال ساده، باید سلکتور درست صفحه دسته‌بندی رو پیدا کنی
+    product_links = set()
+    for a in result.select("a.product-link"):
+        href = a.attrs.get("href")
+        if href and href.startswith("/product/"):
+            full_url = "https://wiraa.ir" + href
+            product_links.add(full_url)
+
+    print(f"Found {len(product_links)} products")
+
+    for url in product_links:
+        await crawl_product(crawler, url)
 
 if __name__ == "__main__":
     asyncio.run(main())
