@@ -3,32 +3,24 @@
 import sys
 sys.path.insert(0, './crawl4ai')
 
-from crawl4ai.agent import CrawlAgent
-from crawl4ai.plugins.extract import ExtractProduct
-from crawl4ai.plugins.actions import ClickNextPage
-from crawl4ai.plugins.browsing import VisitURLs
-from crawl4ai.plugins.utils import SaveAsJSONLines
+# crawler.py
 
-# لینک دسته‌بندی‌ها
-CATEGORY_URLS = [
-    "https://wiraa.ir/category/آرایشی-و-بهداشتی"
-]
+from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
 
-agent = CrawlAgent(
-    name="wiraa-product-crawler",
-    start_urls=CATEGORY_URLS,
-    plugins=[
-        VisitURLs(follow_links={"include": [r"/category/.*"]}),
-        ClickNextPage(button_text="بعدی"),  # یا اگر کلاس خاصی داره با selector
-        VisitURLs(follow_links={"include": [r"/product/.*"]}),
-        ExtractProduct(selectors={
-            "title": "h1.product_title",
-            "price": ".price",
-            "description": ".woocommerce-Tabs-panel--description",
-        }),
-        SaveAsJSONLines("products.jsonl"),
-    ]
+config = HTTPCrawlerConfig(
+    start_urls=["https://wiraa.ir/category/آرایشی-و-بهداشتی"],
+    follow_url_patterns=[r"/category/.*", r"/product/.*"],
+    max_pages=50,
 )
 
+crawler = AsyncWebCrawler(config=config)
+
 if __name__ == "__main__":
-    agent.run()
+    import asyncio
+
+    async def main():
+        results = await crawler.crawl()
+        for result in results:
+            print(result.url, result.content[:200])  # فقط بخشی از محتوای هر صفحه
+
+    asyncio.run(main())
