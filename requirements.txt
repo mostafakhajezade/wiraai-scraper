@@ -1,3 +1,5 @@
 requests
 beautifulsoup4
 crawl4ai[playwright]
+crawl4ai
+playwright
