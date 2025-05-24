@@ -1,5 +1,3 @@
-# file: crawler.py
-
 import asyncio
 from crawl4ai import AsyncWebCrawler, BrowserConfig
 
@@ -12,10 +10,11 @@ config = BrowserConfig(
     verbose=True
 )
 
-crawler = AsyncWebCrawler(
-    config=config,
-    start_urls=start_urls
-)
+crawler = AsyncWebCrawler(config=config)
+
+async def main():
+    for url in start_urls:
+        await crawler.arun(url)
 
 if __name__ == "__main__":
-    asyncio.run(crawler.arun())
+    asyncio.run(main())
