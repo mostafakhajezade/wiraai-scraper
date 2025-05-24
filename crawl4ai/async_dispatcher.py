@@ -9,7 +9,7 @@ from .models import (
 
 from .components.crawler_monitor import CrawlerMonitor
 
-from .types import AsyncWebCrawler
+from .custom_types import AsyncWebCrawler
 
 from collections.abc import AsyncGenerator
 
