@@ -1,5 +1,6 @@
 # file: crawler.py
 
+import asyncio
 from crawl4ai import AsyncWebCrawler, BrowserConfig
 
 start_urls = [
@@ -17,4 +18,4 @@ crawler = AsyncWebCrawler(
 )
 
 if __name__ == "__main__":
-    crawler.run()
+    asyncio.run(crawler.arun())
