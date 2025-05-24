@@ -6,10 +6,7 @@ start_urls = [
     "https://wiraa.ir/category/آرایشی-و-بهداشتی"
 ]
 
-config = HTTPCrawlerConfig(
-    headless=True,         # بدون باز شدن مرورگر گرافیکی
-    max_pages=100,         # حداکثر تعداد صفحات برای crawl
-)
+config = HTTPCrawlerConfig()
 
 crawler = AsyncWebCrawler(
     config=config,
