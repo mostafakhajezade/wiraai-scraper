@@ -1,6 +1,6 @@
 import asyncio
 import re
-from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
+from crawl4ai import AsyncWebCrawler, BrowserConfig
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
@@ -37,8 +37,10 @@ async def crawl_product(crawler, url):
     supabase.table("products").upsert(data, on_conflict="url").execute()
 
 async def main():
-    config = HTTPCrawlerConfig()
-    config.verbose = True  # اضافه کردن این خط برای رفع ارور
+    config = BrowserConfig()
+    config.verbose = True
+    config.use_managed_browser = True
+
     crawler = AsyncWebCrawler(config=config)
 
     category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
