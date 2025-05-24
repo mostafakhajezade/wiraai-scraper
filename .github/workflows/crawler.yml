@@ -2,14 +2,15 @@ name: Run Wiraa Crawler
 
 on:
   schedule:
-    - cron: '0 0 * * *' # هر روز ساعت ۰۰:۰۰ UTC
-  workflow_dispatch:      # اجرا دستی
+    - cron: '0 */12 * * *'  # هر 12 ساعت اجرا می‌شود
+  workflow_dispatch:  # اجرای دستی
 
 jobs:
-  run:
+  crawl:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -20,13 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          playwright install
 
       - name: Run crawler
-        run: python crawler.py
-
-      - name: Upload product data
-        uses: actions/upload-artifact@v4
-        with:
-          name: product-data
-          path: products.jsonl
+        run: |
+          python crawler.py
