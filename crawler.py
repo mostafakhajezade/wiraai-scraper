@@ -1,12 +1,15 @@
 # file: crawler.py
 
-from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
+from crawl4ai import AsyncWebCrawler, BrowserConfig
 
 start_urls = [
     "https://wiraa.ir/category/آرایشی-و-بهداشتی"
 ]
 
-config = HTTPCrawlerConfig()
+config = BrowserConfig(
+    headless=True,
+    verbose=True
+)
 
 crawler = AsyncWebCrawler(
     config=config,
