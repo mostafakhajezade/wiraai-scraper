@@ -1,5 +1,8 @@
 # file: crawler.py
 
+import sys
+sys.path.insert(0, './crawl4ai')
+
 from crawl4ai.agent import CrawlAgent
 from crawl4ai.plugins.extract import ExtractProduct
 from crawl4ai.plugins.actions import ClickNextPage
