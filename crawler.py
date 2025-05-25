@@ -1,29 +1,74 @@
 import asyncio
 from crawl4ai import AsyncWebCrawler
-from urllib.parse import quote
+from bs4 import BeautifulSoup
+from supabase import create_client, Client
+import os
+
+# تنظیمات Supabase
+SUPABASE_URL = os.getenv("https://xppiarnupitknpraqyjo.supabase.co")
+SUPABASE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+async def fetch_page(crawler, url: str) -> str:
+    result = await crawler.arun(url)
+    if result.success:
+        return result.html
+    else:
+        print(f"Failed to fetch {url}")
+        return ""
+
+def extract_product_links(category_html, base_url) -> list[str]:
+    soup = BeautifulSoup(category_html, "html.parser")
+    links = []
+    # فرض کنیم لینک محصولات در تگ <a> با کلاس "product-link" هست (باید طبق سایت واقعی تغییر بدی)
+    for a in soup.select("a.product-link"):
+        href = a.get("href")
+        if href and href.startswith("/product/"):
+            full_url = base_url.rstrip("/") + href
+            links.append(full_url)
+    return links
+
+def extract_product_data(product_html):
+    soup = BeautifulSoup(product_html, "html.parser")
+    # استخراج نام محصول، فرضاً در تگ h1 با کلاس product-title
+    name_tag = soup.select_one("h1.product-title")
+    name = name_tag.text.strip() if name_tag else "No Name"
+
+    # استخراج قیمت، فرضاً در span با کلاس price
+    price_tag = soup.select_one("span.price")
+    price = price_tag.text.strip() if price_tag else "No Price"
+
+    return {"name": name, "price": price}
 
 async def main():
-    category = "آبمیوه-گیر"
-    url = f"https://wiraa.ir/category/{quote(category)}"
+    base_url = "https://wiraa.ir"
+    category_url = f"{base_url}/category/آبمیوه-گیر"
 
-    crawler = AsyncWebCrawler(
-        max_pages=5,
-        extract_rules={
-            "products": {
-                "selector": "div.styles__product___QFT8B",
-                "type": "list",
-                "children": {
-                    "url": {"selector": "a.styles__link___12EyG", "attr": "href"},
-                    "title": {"selector": "h2.styles__title___EVTlZ", "type": "text"},
-                    "price": {"selector": "div.styles__price___1uiIp.js-price", "type": "text"}
-                }
-            }
-        }
-    )
+    crawler = AsyncWebCrawler()
 
-    results = await crawler.arun(url)
+    # 1. دانلود صفحه دسته‌بندی
+    category_html = await fetch_page(crawler, category_url)
+    if not category_html:
+        return
 
-    for result in results:
-        print(result.html[:1000])  # نمایش بخش کوچکی از HTML برای بررسی سریع
+    # 2. استخراج لینک محصولات
+    product_links = extract_product_links(category_html, base_url)
+    print(f"Found {len(product_links)} products.")
 
-asyncio.run(main())
+    # 3. برای هر محصول، داده‌ها رو استخراج و در Supabase ذخیره کن
+    for url in product_links:
+        product_html = await fetch_page(crawler, url)
+        if not product_html:
+            continue
+        product_data = extract_product_data(product_html)
+        product_data["url"] = url
+
+        # ذخیره در Supabase
+        res = supabase.table("products").insert(product_data).execute()
+        if res.status_code == 201:
+            print(f"Inserted product: {product_data['name']}")
+        else:
+            print(f"Failed to insert product: {product_data['name']} - {res.data}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
