@@ -2,8 +2,9 @@ import asyncio
 from crawl4ai import AsyncWebCrawler
 
 async def main():
+    url = "https://wiraa.ir/category/آبمیوه-گیربگ"
+
     crawler = AsyncWebCrawler(
-        start_urls=["https://wiraa.ir/category/آبمیوه-گیربگ"],
         max_pages=5,
         extract_rules={
             "products": {
@@ -18,7 +19,7 @@ async def main():
         }
     )
 
-    results = await crawler.arun()
+    results = await crawler.arun(url)
 
     for result in results:
         for product in result.get("products", []):
