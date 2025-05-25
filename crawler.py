@@ -1,9 +1,10 @@
 import asyncio
 import re
-from crawl4ai import AsyncWebCrawler, BrowserConfig
+from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
+# اتصال به Supabase
 SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -13,48 +14,43 @@ def parse_price(price_str):
     return int(digits) if digits else None
 
 def parse_availability(avail_str):
-    return avail_str.strip() == "موجود"
+    return "موجود" in avail_str
 
 async def crawl_product(crawler, url):
     print(f"Crawling product: {url}")
     result = await crawler.arun(url)
     soup = BeautifulSoup(result.html, "html.parser")
 
-    name = soup.select_one("h1.product-name").text.strip() if soup.select_one("h1.product-name") else ""
-    price = soup.select_one(".price").text.strip() if soup.select_one(".price") else ""
-    availability = soup.select_one(".availability").text.strip() if soup.select_one(".availability") else ""
-
-    price_num = parse_price(price)
-    available = parse_availability(availability)
+    name = soup.select_one("h1.product-name")
+    price = soup.select_one(".price")
+    availability = soup.select_one(".availability")
 
     data = {
         "url": url,
-        "name": name,
-        "price": price_num,
-        "available": available,
+        "name": name.text.strip() if name else "",
+        "price": parse_price(price.text) if price else None,
+        "available": parse_availability(availability.text) if availability else False,
     }
+
     print(f"Saving product: {data}")
     supabase.table("products").upsert(data, on_conflict="url").execute()
 
 async def main():
-    config = BrowserConfig()
+    config = HTTPCrawlerConfig()
     config.verbose = True
-    config.use_managed_browser = True
-
     crawler = AsyncWebCrawler(config=config)
 
     category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
-
     print(f"Crawling category page: {category_url}")
     result = await crawler.arun(category_url)
     soup = BeautifulSoup(result.html, "html.parser")
 
+    # انتخاب همه لینک‌هایی که به محصولات اشاره دارند
     product_links = set()
-    for a in soup.select("a.product-link"):
-        href = a.attrs.get("href")
-        if href and href.startswith("/product/"):
-            full_url = "https://wiraa.ir" + href
-            product_links.add(full_url)
+    for a in soup.select('a[href^="/product/"]'):
+        href = a.get("href")
+        if href:
+            product_links.add("https://wiraa.ir" + href)
 
     print(f"Found {len(product_links)} products")
 
