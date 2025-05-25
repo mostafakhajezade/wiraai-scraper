@@ -1,13 +1,15 @@
 import asyncio
 import re
 from bs4 import BeautifulSoup
-from crawl4ai.async_requests_crawler import AsyncRequestsCrawler  # 👈 crawler مناسب با HTTP
+from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
 from supabase import create_client, Client
 
+# اتصال به Supabase
 SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+SUPABASE_KEY = "your-supabase-key-here"  # 👈 حواست باشه اینو ایمن نگه داری
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# تبدیل قیمت به عدد
 def parse_price(price_str):
     digits = re.sub(r"[^\d]", "", price_str)
     return int(digits) if digits else None
@@ -15,6 +17,7 @@ def parse_price(price_str):
 def parse_availability(avail_str):
     return avail_str.strip() == "موجود"
 
+# کرال کردن صفحه محصول
 async def crawl_product(crawler, url):
     print(f"Crawling product: {url}")
     result = await crawler.arun(url)
@@ -30,25 +33,26 @@ async def crawl_product(crawler, url):
         "price": parse_price(price.text) if price else None,
         "available": parse_availability(availability.text) if availability else False,
     }
-
-    print(f"Saving product: {data}")
+    print(f"Inserting: {data}")
     supabase.table("products").upsert(data, on_conflict="url").execute()
 
+# کرال کردن لینک‌های یک دسته‌بندی
 async def main():
-    crawler = AsyncRequestsCrawler()
+    config = HTTPCrawlerConfig()
+    crawler = AsyncWebCrawler(config=config)
 
-    category_url = "https://wiraa.ir/category/آبمیوه-گیر"
-    print(f"Crawling category page: {category_url}")
+    category_url = "https://wiraa.ir/category/آبمیوه-گیر"  # ← این لینک دسته‌بندی رو می‌تونی تغییر بدی
     result = await crawler.arun(category_url)
     soup = BeautifulSoup(result.html, "html.parser")
 
+    # سلکتور کارت‌های محصول رو با توجه به سایتت تنظیم کن
     product_links = set()
-    for a in soup.select("a[href^='/product/']"):
+    for a in soup.select("div.grid__container-12___3u-ry a"):
         href = a.get("href")
-        product_links.add("https://wiraa.ir" + href)
+        if href and href.startswith("/product/"):
+            product_links.add("https://wiraa.ir" + href)
 
-    print(f"Found {len(product_links)} products")
-
+    print(f"Found {len(product_links)} product links")
     for url in product_links:
         await crawl_product(crawler, url)
 
