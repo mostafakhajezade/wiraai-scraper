@@ -26,6 +26,9 @@ jobs:
           pip install crawl4ai playwright supabase
           playwright install
 
+      - name: Show crawl4ai version
+        run: pip show crawl4ai
+
       - name: Run crawler script
         run: python crawler.py
         env:
