@@ -1,7 +1,11 @@
-name: Run Web Crawler
+name: Run Crawl4AI Crawler
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 2 * * *'  # هر روز ساعت ۲ صبح اجرا میشه (اختیاری)
 
 jobs:
   crawl:
@@ -16,13 +20,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Upgrade pip and install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install playwright
-          playwright install --with-deps
-          pip install --upgrade crawl4ai
+          pip install crawl4ai playwright supabase
+          playwright install
 
-      - name: Run crawler
+      - name: Run crawler script
         run: python crawler.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
