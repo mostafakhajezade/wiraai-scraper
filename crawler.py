@@ -1,5 +1,9 @@
-from crawl4ai import crawl
+from crawl4ai import AsyncCrawler
+import asyncio
 
 async def main():
-    result = await crawl("https://wiraa.ir/category/آبمیوه-گیر")
-    print(result.html)  # چاپ کل HTML صفحه
+    crawler = AsyncCrawler()
+    result = await crawler.crawl("https://wiraا.ir/category/آبمیوه-گیر")
+    print(result.html)
+
+asyncio.run(main())
