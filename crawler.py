@@ -3,7 +3,7 @@ from crawl4ai import AsyncWebCrawler
 from urllib.parse import quote
 
 async def main():
-    category = "آبمیوه-گیربگ"
+    category = "آبمیوه-گیر"
     url = f"https://wiraa.ir/category/{quote(category)}"
 
     crawler = AsyncWebCrawler(
