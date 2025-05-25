@@ -1,10 +1,9 @@
 import asyncio
 import re
-from crawl4ai import AsyncWebCrawler, BrowserConfig, HTTPCrawlerConfig
+from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig, BrowserConfig
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
-# تنظیمات سوپابیس
 SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -38,10 +37,10 @@ async def crawl_product(crawler, url):
     supabase.table("products").upsert(data, on_conflict="url").execute()
 
 async def main():
-    browser_config = BrowserConfig()
-    browser_config.browser_type = "chromium"  # یا "firefox" یا "webkit"
-    config = HTTPCrawlerConfig(browser_config=browser_config)
-    crawler = AsyncWebCrawler(config=config)
+    config = HTTPCrawlerConfig()  # تنظیمات پایه
+    browser_config = BrowserConfig()  # تنظیمات مرورگر (playwright)
+
+    crawler = AsyncWebCrawler(config=config, browser_config=browser_config)
 
     category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
     print(f"Crawling category page: {category_url}")
@@ -49,10 +48,9 @@ async def main():
     soup = BeautifulSoup(result.html, "html.parser")
 
     product_links = set()
-    # سلکتور لینک محصول رو متناسب با سایت خودتون تنظیم کنید:
-    for a in soup.select("div.grid__container-12___3u-ry a"):
+    for a in soup.select("a[href^='/product/']"):
         href = a.attrs.get("href")
-        if href and href.startswith("/product/"):
+        if href:
             full_url = "https://wiraa.ir" + href
             product_links.add(full_url)
 
