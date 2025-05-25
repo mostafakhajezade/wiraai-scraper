@@ -6,7 +6,7 @@ from supabase import create_client, Client
 
 # اتصال به Supabase
 SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
-SUPABASE_KEY = "your-supabase-key-here"  # 👈 حواست باشه اینو ایمن نگه داری
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94"  # 👈 حواست باشه اینو ایمن نگه داری
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # تبدیل قیمت به عدد
