@@ -1,5 +1,6 @@
 import asyncio
 import re
+from crawl4ai import AsyncHTTPCrawler
 from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
@@ -36,9 +37,15 @@ async def crawl_product(crawler, url):
     supabase.table("products").upsert(data, on_conflict="url").execute()
 
 async def main():
+    crawler = AsyncHTTPCrawler()  # 👈 به جای AsyncWebCrawler از این استفاده کن
+
+    category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
+    print(f"Crawling category page: {category_url}")
+    result = await crawler.arun(category_url)
+    
     config = HTTPCrawlerConfig()
     config.verbose = True
-    crawler = AsyncWebCrawler(config=config)
+    
 
     category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
     print(f"Crawling category page: {category_url}")
