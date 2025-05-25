@@ -22,8 +22,8 @@ async def main():
     results = await crawler.arun(url)
 
     for result in results:
-        products = result.data.get("products", [])  # ✔ استفاده صحیح از data داخل CrawlResult
-        for product in products:
-            print(product)
+        print("\n🔎 Raw result:", result)
+        print("\n🔎 Dir result:", dir(result))
+        print("\n🔎 Result as dict:", result.__dict__)
 
 asyncio.run(main())
