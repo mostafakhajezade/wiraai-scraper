@@ -1,11 +1,11 @@
 import asyncio
 import re
-from crawl4ai import AsyncWebCrawler, PlaywrightCrawlerConfig
+from crawl4ai import AsyncWebCrawler, BrowserCrawlerConfig
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
 SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94"
+SUPABASE_KEY = "YOUR_SUPABASE_KEY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def parse_price(price_str):
@@ -37,7 +37,7 @@ async def crawl_product(crawler, url):
     supabase.table("products").upsert(data, on_conflict="url").execute()
 
 async def main():
-    config = PlaywrightCrawlerConfig()
+    config = BrowserCrawlerConfig()
     config.verbose = True
     crawler = AsyncWebCrawler(config=config)
 
