@@ -24,4 +24,7 @@ jobs:
           python -m playwright install
 
       - name: Run crawler script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python crawler.py
