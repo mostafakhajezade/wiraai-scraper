@@ -1,61 +1,32 @@
 import asyncio
-import re
-from crawl4ai import AsyncWebCrawler, BrowserConfig
-from supabase import create_client
-from bs4 import BeautifulSoup
-
-SUPABASE_URL = "https://xppiarnupitknpraqyjo.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGlhcm51cGl0a25wcmFxeWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwODQyNjIsImV4cCI6MjA2MzY2MDI2Mn0.JIFkUNhH0OL2M8KRDsvvoyqke6_dFQqIgDWcTH5iz94"
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-def parse_price(price_str):
-    digits = re.sub(r"[^\d]", "", price_str)
-    return int(digits) if digits else None
-
-def parse_availability(avail_str):
-    return avail_str.strip() == "موجود"
-
-async def crawl_product(crawler, url):
-    print(f"Crawling product: {url}")
-    result = await crawler.arun(url)
-    soup = BeautifulSoup(result.html, "html.parser")
-
-    name = soup.select_one("h1.product-name").text.strip() if soup.select_one("h1.product-name") else ""
-    price = soup.select_one(".price").text.strip() if soup.select_one(".price") else ""
-    availability = soup.select_one(".availability").text.strip() if soup.select_one(".availability") else ""
-
-    price_num = parse_price(price)
-    available = parse_availability(availability)
-
-    data = {
-        "url": url,
-        "name": name,
-        "price": price_num,
-        "available": available,
-    }
-    print(f"Saving product: {data}")
-    supabase.table("products").upsert(data, on_conflict="url").execute()
+from crawl4ai.async_webcrawler import AsyncWebCrawler, HTTPCrawlerConfig, Extractor
 
 async def main():
-    browser_config = BrowserConfig()
-    crawler = AsyncWebCrawler(config=browser_config)
+    # آدرس صفحه دسته‌بندی که میخوای محصولا رو ازش بگیری
+    start_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
 
-    category_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
-    print(f"Crawling category page: {category_url}")
-    result = await crawler.arun(category_url)
-    soup = BeautifulSoup(result.html, "html.parser")
+    # تنظیم استخراج داده ها: محصول داخل div با کلاس مخصوص، و استخراج موارد دلخواه
+    extractor = Extractor(
+        css_selector="div.styles__product___QFT8B",
+        attributes={
+            "url": "a.styles__link___12EyG::attr(href)",
+            "title": "h2.styles__title___EVTlZ::text",
+            "price": "div.styles__price___1uiIp.js-price::text"
+        }
+    )
 
-    product_links = set()
-    for a in soup.select("a[href^='/product/']"):
-        href = a.attrs.get("href")
-        if href:
-            full_url = "https://wiraa.ir" + href
-            product_links.add(full_url)
+    # تنظیمات کلی کرال
+    config = HTTPCrawlerConfig(
+        start_urls=[start_url],
+        extractors=[extractor],
+        # اگر بخوای محدودیت سرعت و تعداد صفحه بذاری، اینجا میشه اضافه کرد
+        max_pages=5
+    )
 
-    print(f"Found {len(product_links)} products")
+    crawler = AsyncWebCrawler(config=config)
 
-    for url in product_links:
-        await crawl_product(crawler, url)
+    async for result in crawler.crawl():
+        # اینجا می‌تونی اطلاعات هر محصول رو ببینی و ذخیره کنی
+        print(result)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
