@@ -22,6 +22,7 @@ jobs:
           pip install -r requirements.txt
           pip install playwright
           playwright install --with-deps
+          pip install --upgrade crawl4ai
 
       - name: Run crawler
         run: python crawler.py
