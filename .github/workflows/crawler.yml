@@ -30,8 +30,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          python -m playwright install
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install playwright
+        playwright install --with-deps  # نصب مرورگرها و وابستگی‌ها
 
       - name: Run crawler
         run: |
