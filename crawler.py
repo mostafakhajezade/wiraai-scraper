@@ -28,7 +28,6 @@ async def fetch_page(crawler, url: str) -> str:
 def extract_product_links(category_html, base_url) -> list[str]:
     soup = BeautifulSoup(category_html, "html.parser")
     links = []
-    # فرض میکنیم لینک محصولات داخل تگ <a> که href شامل "/product/" هست
     for a in soup.select("a[href^='/product/']"):
         href = a.get("href")
         if href:
@@ -39,17 +38,13 @@ def extract_product_links(category_html, base_url) -> list[str]:
 
 def extract_product_data(product_html):
     soup = BeautifulSoup(product_html, "html.parser")
-    # استخراج نام محصول از h2 با کلاس مشخص شده
     name_tag = soup.select_one("h2.styles__title___EVTlZ")
     name = name_tag.text.strip() if name_tag else "No Name"
 
-    # استخراج قیمت از div با کلاس مشخص شده
     price_tag = soup.select_one("div.styles__price___1uiIp.js-price")
     price = price_tag.text.strip() if price_tag else "No Price"
     price = persian_to_english_numbers(price)
-
-    # حذف کاراکترهای اضافی مثل svg و فاصله‌ها و احتمالا "تومان" اگر هست
-    price = re.sub(r"[^\d,.]", "", price).replace(",", "").strip()
+    price = re.sub(r"[^\d]", "", price)  # فقط اعداد نگه داشته شوند
 
     return {"name": name, "price": price}
 
@@ -59,17 +54,14 @@ async def main():
 
     crawler = AsyncWebCrawler()
 
-    # 1. دانلود صفحه دسته‌بندی
     category_html = await fetch_page(crawler, category_url)
     if not category_html:
         print("Failed to fetch category page")
         return
 
-    # 2. استخراج لینک محصولات
     product_links = extract_product_links(category_html, base_url)
     print(f"Found {len(product_links)} products.")
 
-    # 3. استخراج و ذخیره محصول‌ها
     for url in product_links:
         product_html = await fetch_page(crawler, url)
         if not product_html:
@@ -77,12 +69,11 @@ async def main():
         product_data = extract_product_data(product_html)
         product_data["url"] = url
 
-        # ذخیره در Supabase
         res = supabase.table("products").insert(product_data).execute()
-        if res.status_code == 201:
+        if res.error is None:
             print(f"Inserted product: {product_data['name']}")
         else:
-            print(f"Failed to insert product: {product_data['name']} - {res.data}")
+            print(f"Failed to insert product: {product_data['name']} - {res.error}")
 
 if __name__ == "__main__":
     asyncio.run(main())
