@@ -1,8 +1,10 @@
 import asyncio
 from crawl4ai import AsyncWebCrawler
+from urllib.parse import quote
 
 async def main():
-    url = "https://wiraa.ir/category/آبمیوه-گیربگ"
+    category = "آبمیوه-گیربگ"
+    url = f"https://wiraa.ir/category/{quote(category)}"
 
     crawler = AsyncWebCrawler(
         max_pages=5,
@@ -22,8 +24,6 @@ async def main():
     results = await crawler.arun(url)
 
     for result in results:
-        print("\n🔎 Raw result:", result)
-        print("\n🔎 Dir result:", dir(result))
-        print("\n🔎 Result as dict:", result.__dict__)
+        print(result.html[:1000])  # نمایش بخش کوچکی از HTML برای بررسی سریع
 
 asyncio.run(main())
