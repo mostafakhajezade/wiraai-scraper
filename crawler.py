@@ -1,7 +1,7 @@
 import asyncio
 import re
 from crawl4ai import AsyncHTTPCrawler
-from crawl4ai import AsyncWebCrawler, HTTPCrawlerConfig
+from crawl4ai import HTTPCrawlerConfig
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
