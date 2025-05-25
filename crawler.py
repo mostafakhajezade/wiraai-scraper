@@ -18,7 +18,10 @@ async def main():
         }
     )
 
-    # پرینت متدها و ویژگی‌ها
-    print(dir(crawler))
+    results = await crawler.arun()
+
+    for result in results:
+        for product in result.get("products", []):
+            print(product)
 
 asyncio.run(main())
