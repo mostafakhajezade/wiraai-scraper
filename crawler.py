@@ -1,28 +1,29 @@
 import asyncio
-from crawl4ai.async_webcrawler import AsyncWebCrawler, Extractor
-from crawl4ai.config import HTTPCrawlerConfig
+from crawl4ai import AsyncWebCrawler
 
 async def main():
-    start_url = "https://wiraa.ir/category/آبمیوه-گیربگ"
-
-    extractor = Extractor(
-        css_selector="div.styles__product___QFT8B",
-        attributes={
-            "url": "a.styles__link___12EyG::attr(href)",
-            "title": "h2.styles__title___EVTlZ::text",
-            "price": "div.styles__price___1uiIp.js-price::text"
+    crawler = AsyncWebCrawler(
+        start_urls=["https://wiraa.ir/category/آبمیوه-گیربگ"],
+        max_pages=5,
+        extract_rules={
+            "products": {
+                "selector": "div.styles__product___QFT8B",
+                "type": "list",
+                "children": {
+                    "url": {"selector": "a.styles__link___12EyG", "attr": "href"},
+                    "title": {"selector": "h2.styles__title___EVTlZ", "type": "text"},
+                    "price": {"selector": "div.styles__price___1uiIp.js-price", "type": "text"}
+                }
+            }
         }
     )
 
-    config = HTTPCrawlerConfig(
-        start_urls=[start_url],
-        extractors=[extractor],
-        max_pages=5
-    )
-
-    crawler = AsyncWebCrawler(config=config)
-
-    async for result in crawler.crawl():
-        print(result)
+    async for page in crawler.crawl():
+        products = page.get("products", [])
+        for product in products:
+            print(f"Title: {product.get('title')}")
+            print(f"Price: {product.get('price')}")
+            print(f"URL: {product.get('url')}")
+            print("="*40)
 
 asyncio.run(main())
