@@ -18,13 +18,7 @@ async def main():
         }
     )
 
-    # با استفاده از متد crawl_pages باید اجرا کنیم
-    async for page in crawler.crawl_pages():
-        products = page.get("products", [])
-        for product in products:
-            print(f"Title: {product.get('title')}")
-            print(f"Price: {product.get('price')}")
-            print(f"URL: {product.get('url')}")
-            print("-" * 40)
+    # پرینت متدها و ویژگی‌ها
+    print(dir(crawler))
 
 asyncio.run(main())
