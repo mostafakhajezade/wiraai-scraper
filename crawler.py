@@ -4,13 +4,13 @@ from bs4 import BeautifulSoup
 from supabase import create_client, Client
 import os
 import re
+from urllib.parse import urljoin
 
 # تنظیمات Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# تابع کمکی تبدیل اعداد فارسی به انگلیسی
 def persian_to_english_numbers(text: str) -> str:
     persian_nums = "۰۱۲۳۴۵۶۷۸۹"
     english_nums = "0123456789"
@@ -31,7 +31,7 @@ def extract_product_links(category_html, base_url) -> list[str]:
     for a in soup.select("a[href^='/product/']"):
         href = a.get("href")
         if href:
-            full_url = base_url.rstrip("/") + href
+            full_url = urljoin(base_url, href)
             if full_url not in links:
                 links.append(full_url)
     return links
