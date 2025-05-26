@@ -73,12 +73,14 @@ async def main():
         product_data = extract_product_data(product_html)
         product_data["url"] = url
 
-        # ذخیره در Supabase
-        res = supabase.table("products").insert(product_data).execute()
-        if res.data:
+        try:
+            res = supabase.table("products").insert(product_data).execute()
             print(f"Inserted product: {product_data['name']}")
-        else:
-            print(f"Failed to insert product: {product_data['name']} - Response: {res}")
+        except Exception as e:
+            if "duplicate key" in str(e).lower():
+                print(f"Duplicate product skipped: {product_data['name']}")
+            else:
+                print(f"Failed to insert product: {product_data['name']} - {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
