@@ -5,28 +5,23 @@ from supabase import create_client, Client
 import os
 import re
 
-# --- تنظیمات Supabase ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- تبدیل اعداد فارسی به انگلیسی ---
 def persian_to_english_numbers(text: str) -> str:
     persian_nums = "۰۱۲۳۴۵۶۷۸۹"
     english_nums = "0123456789"
     translation_table = str.maketrans(persian_nums, english_nums)
     return text.translate(translation_table)
 
-# --- دریافت HTML یک صفحه ---
 async def fetch_page(crawler, url: str) -> str:
     result = await crawler.arun(url)
     if result.success:
         return result.html
-    else:
-        print(f"[ERROR] Failed to fetch {url}")
-        return ""
+    print(f"[ERROR] Failed to fetch {url}")
+    return ""
 
-# --- گرفتن لینک دسته‌بندی‌ها ---
 def extract_category_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
     links = []
@@ -37,7 +32,6 @@ def extract_category_links(html: str, base_url: str) -> list[str]:
             links.append(full_url)
     return links
 
-# --- گرفتن لینک محصولات ---
 def extract_product_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
     links = []
@@ -48,20 +42,32 @@ def extract_product_links(html: str, base_url: str) -> list[str]:
             links.append(full_url)
     return links
 
-# --- گرفتن اطلاعات یک محصول ---
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
-
     name_tag = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
     name = name_tag.text.strip() if name_tag else "No Name"
-
     price_tag = soup.select_one("div.styles__price___1uiIp.js-price")
     price_text = price_tag.text.strip() if price_tag else "0"
     price = re.sub(r"[^\d]", "", persian_to_english_numbers(price_text))
-
     return {"name": name, "price": price}
 
-# --- تابع اصلی ---
+async def upsert_product(product: dict):
+    try:
+        existing = supabase.table("products").select("id").eq("url", product["url"]).execute()
+        if existing.data:
+            # Update
+            res = supabase.table("products").update({
+                "name": product["name"],
+                "price": product["price"]
+            }).eq("url", product["url"]).execute()
+            print(f"      ↳ Updated existing product ✅")
+        else:
+            # Insert
+            res = supabase.table("products").insert(product).execute()
+            print(f"      ↳ Inserted new product ✅")
+    except Exception as e:
+        print(f"      ↳ Failed ❌: {e}")
+
 async def main():
     base_url = "https://wiraa.ir"
     crawler = AsyncWebCrawler()
@@ -91,22 +97,8 @@ async def main():
             product["url"] = url
 
             print(f"    → {product['name']} ({url})")
-
-            try:
-                existing = supabase.table("products").select("id").eq("url", url).execute()
-                if existing.data:
-                    # اگر محصول وجود داشت، آپدیت می‌کنیم
-                    supabase.table("products").update({
-                        "name": product["name"],
-                        "price": product["price"]
-                    }).eq("url", url).execute()
-                    print(f"      ↳ Updated existing product ✅\n")
-                else:
-                    supabase.table("products").insert(product).execute()
-                    print(f"      ↳ Inserted new product ✅\n")
-
-            except Exception as e:
-                print(f"      ↳ Failed ❌: {e}\n")
+            await upsert_product(product)
+            print()
 
 if __name__ == "__main__":
     asyncio.run(main())
