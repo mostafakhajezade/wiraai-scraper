@@ -17,7 +17,7 @@ def persian_to_english_numbers(text: str) -> str:
     translation_table = str.maketrans(persian_nums, english_nums)
     return text.translate(translation_table)
 
-# دریافت محتوای صفحه
+# دریافت HTML یک صفحه
 async def fetch_page(crawler, url: str) -> str:
     result = await crawler.arun(url)
     if result.success:
@@ -26,19 +26,29 @@ async def fetch_page(crawler, url: str) -> str:
         print(f"Failed to fetch {url}")
         return ""
 
-# استخراج لینک محصولات از صفحه دسته‌بندی
+# گرفتن لیست دسته‌بندی‌ها
+def extract_category_links(home_html: str, base_url: str) -> list[str]:
+    soup = BeautifulSoup(home_html, "html.parser")
+    links = []
+    for a in soup.select("a[href^='/category/']"):
+        href = a.get("href")
+        full_url = base_url.rstrip("/") + href
+        if full_url not in links:
+            links.append(full_url)
+    return links
+
+# گرفتن لینک محصولات از صفحه دسته‌بندی
 def extract_product_links(category_html, base_url) -> list[str]:
     soup = BeautifulSoup(category_html, "html.parser")
     links = []
     for a in soup.select("a[href^='/product/']"):
         href = a.get("href")
-        if href:
-            full_url = base_url.rstrip("/") + href
-            if full_url not in links:
-                links.append(full_url)
+        full_url = base_url.rstrip("/") + href
+        if full_url not in links:
+            links.append(full_url)
     return links
 
-# استخراج نام و قیمت محصول از HTML
+# گرفتن اطلاعات محصول
 def extract_product_data(product_html):
     soup = BeautifulSoup(product_html, "html.parser")
     name_tag = soup.select_one("h2.styles__title___EVTlZ")
@@ -47,40 +57,51 @@ def extract_product_data(product_html):
     price_tag = soup.select_one("div.styles__price___1uiIp.js-price")
     price = price_tag.text.strip() if price_tag else "No Price"
     price = persian_to_english_numbers(price)
-    price = re.sub(r"[^\d]", "", price)  # فقط اعداد
+    price = re.sub(r"[^\d]", "", price)
 
     return {"name": name, "price": price}
 
 # تابع اصلی
 async def main():
     base_url = "https://wiraa.ir"
-    category_url = f"{base_url}/category/آبمیوه-گیر"
+    home_url = base_url
 
     crawler = AsyncWebCrawler()
 
-    category_html = await fetch_page(crawler, category_url)
-    if not category_html:
-        print("Failed to fetch category page")
+    # 1. گرفتن دسته‌بندی‌ها
+    home_html = await fetch_page(crawler, home_url)
+    if not home_html:
+        print("Failed to fetch homepage.")
         return
 
-    product_links = extract_product_links(category_html, base_url)
-    print(f"Found {len(product_links)} products.")
+    category_links = extract_category_links(home_html, base_url)
+    print(f"Found {len(category_links)} categories.")
 
-    for url in product_links:
-        product_html = await fetch_page(crawler, url)
-        if not product_html:
+    for category_url in category_links:
+        print(f"Processing category: {category_url}")
+        category_html = await fetch_page(crawler, category_url)
+        if not category_html:
             continue
-        product_data = extract_product_data(product_html)
-        product_data["url"] = url
 
-        try:
-            res = supabase.table("products").insert(product_data).execute()
-            print(f"Inserted product: {product_data['name']}")
-        except Exception as e:
-            if "duplicate key" in str(e).lower():
-                print(f"Duplicate product skipped: {product_data['name']}")
-            else:
-                print(f"Failed to insert product: {product_data['name']} - {e}")
+        product_links = extract_product_links(category_html, base_url)
+        print(f"  Found {len(product_links)} products.")
+
+        for url in product_links:
+            product_html = await fetch_page(crawler, url)
+            if not product_html:
+                continue
+
+            product_data = extract_product_data(product_html)
+            product_data["url"] = url
+
+            try:
+                res = supabase.table("products").insert(product_data).execute()
+                print(f"    Inserted product: {product_data['name']}")
+            except Exception as e:
+                if "duplicate key" in str(e).lower():
+                    print(f"    Duplicate product skipped: {product_data['name']}")
+                else:
+                    print(f"    Failed to insert product: {product_data['name']} - {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
