@@ -91,7 +91,7 @@ async def main():
             product = extract_product_data(html)
             product["url"] = url
 
-            # چاپ عنوان و لینک
+            # چاپ عنوان و لینک مربوط به همان محصول
             print(f"    → {product['name']} ({url})")
 
             # بررسی تکراری بودن
@@ -107,6 +107,5 @@ async def main():
             except Exception as e:
                 print(f"      ↳ Failed ❌: {e}\n")
 
-# اجرای برنامه
 if __name__ == "__main__":
     asyncio.run(main())
