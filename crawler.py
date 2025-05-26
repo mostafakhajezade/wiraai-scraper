@@ -52,7 +52,6 @@ def extract_product_links(html: str, base_url: str) -> list[str]:
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
-    # اصلاح سلکتور نام محصول با توجه به نمونه HTML
     name_tag = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
     name = name_tag.text.strip() if name_tag else "No Name"
 
@@ -67,7 +66,6 @@ async def main():
     base_url = "https://wiraa.ir"
     crawler = AsyncWebCrawler()
 
-    # گرفتن لیست دسته‌بندی‌ها
     homepage_html = await fetch_page(crawler, base_url)
     if not homepage_html:
         return
@@ -92,18 +90,20 @@ async def main():
             product = extract_product_data(html)
             product["url"] = url
 
-            # چاپ عنوان و لینک مربوط به همان محصول
             print(f"    → {product['name']} ({url})")
 
-            # بررسی تکراری بودن
             try:
                 existing = supabase.table("products").select("id").eq("url", url).execute()
                 if existing.data:
-                    print(f"      ↳ Skipped (duplicate)\n")
-                    continue
-
-                supabase.table("products").insert(product).execute()
-                print(f"      ↳ Inserted ✅\n")
+                    # اگر محصول وجود داشت، آپدیت می‌کنیم
+                    supabase.table("products").update({
+                        "name": product["name"],
+                        "price": product["price"]
+                    }).eq("url", url).execute()
+                    print(f"      ↳ Updated existing product ✅\n")
+                else:
+                    supabase.table("products").insert(product).execute()
+                    print(f"      ↳ Inserted new product ✅\n")
 
             except Exception as e:
                 print(f"      ↳ Failed ❌: {e}\n")
