@@ -75,10 +75,10 @@ async def main():
 
         # ذخیره در Supabase
         res = supabase.table("products").insert(product_data).execute()
-        if res.error is None:
+        if res.data:
             print(f"Inserted product: {product_data['name']}")
         else:
-            print(f"Failed to insert product: {product_data['name']} - {res.error}")
+            print(f"Failed to insert product: {product_data['name']} - Response: {res}")
 
 if __name__ == "__main__":
     asyncio.run(main())
