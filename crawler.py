@@ -10,13 +10,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# تابع کمکی تبدیل اعداد فارسی به انگلیسی
+# تبدیل اعداد فارسی به انگلیسی
 def persian_to_english_numbers(text: str) -> str:
     persian_nums = "۰۱۲۳۴۵۶۷۸۹"
     english_nums = "0123456789"
-    translation_table = str.maketrans("".join(persian_nums), "".join(english_nums))
+    translation_table = str.maketrans(persian_nums, english_nums)
     return text.translate(translation_table)
 
+# دریافت محتوای صفحه
 async def fetch_page(crawler, url: str) -> str:
     result = await crawler.arun(url)
     if result.success:
@@ -25,6 +26,7 @@ async def fetch_page(crawler, url: str) -> str:
         print(f"Failed to fetch {url}")
         return ""
 
+# استخراج لینک محصولات از صفحه دسته‌بندی
 def extract_product_links(category_html, base_url) -> list[str]:
     soup = BeautifulSoup(category_html, "html.parser")
     links = []
@@ -36,6 +38,7 @@ def extract_product_links(category_html, base_url) -> list[str]:
                 links.append(full_url)
     return links
 
+# استخراج نام و قیمت محصول از HTML
 def extract_product_data(product_html):
     soup = BeautifulSoup(product_html, "html.parser")
     name_tag = soup.select_one("h2.styles__title___EVTlZ")
@@ -44,10 +47,11 @@ def extract_product_data(product_html):
     price_tag = soup.select_one("div.styles__price___1uiIp.js-price")
     price = price_tag.text.strip() if price_tag else "No Price"
     price = persian_to_english_numbers(price)
-    price = re.sub(r"[^\d]", "", price)  # فقط اعداد نگه داشته شوند
+    price = re.sub(r"[^\d]", "", price)  # فقط اعداد
 
     return {"name": name, "price": price}
 
+# تابع اصلی
 async def main():
     base_url = "https://wiraa.ir"
     category_url = f"{base_url}/category/آبمیوه-گیر"
@@ -69,11 +73,12 @@ async def main():
         product_data = extract_product_data(product_html)
         product_data["url"] = url
 
+        # ذخیره در Supabase
         res = supabase.table("products").insert(product_data).execute()
-        if res.status_code == 201:
+        if res.error is None:
             print(f"Inserted product: {product_data['name']}")
         else:
-            print(f"Failed to insert product: {product_data['name']} - {res.data}")
+            print(f"Failed to insert product: {product_data['name']} - {res.error}")
 
 if __name__ == "__main__":
     asyncio.run(main())
