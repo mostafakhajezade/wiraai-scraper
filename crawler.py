@@ -52,7 +52,8 @@ def extract_product_links(html: str, base_url: str) -> list[str]:
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
-    name_tag = soup.select_one("h2.styles__title___EVTlZ")
+    # اصلاح سلکتور نام محصول با توجه به نمونه HTML
+    name_tag = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
     name = name_tag.text.strip() if name_tag else "No Name"
 
     price_tag = soup.select_one("div.styles__price___1uiIp.js-price")
