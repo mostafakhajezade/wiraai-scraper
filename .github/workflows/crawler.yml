@@ -34,8 +34,7 @@ jobs:
           pip install -r requirements.txt crawl4ai supabase beautifulsoup4 httpx playwright
           playwright install
 
-      - name: Show crawl4ai version
-        run: pip show crawl4ai
+      
 
       - name: Run crawler script
         env:
