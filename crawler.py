@@ -29,13 +29,19 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 # --- Extract category links from homepage ---
 def extract_category_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = {base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/category/']")}
+    links = {
+        base_url.rstrip('/') + a['href']
+        for a in soup.select("a[href^='/category/']")
+    }
     return list(links)
 
 # --- Extract product links from a category page ---
 def extract_product_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = {base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/product/']")}
+    links = {
+        base_url.rstrip('/') + a['href']
+        for a in soup.select("a[href^='/product/']")
+    }
     return list(links)
 
 # --- Extract product data (name and price) ---
@@ -71,7 +77,6 @@ async def main():
         products = extract_product_links(cat_html, base_url)
         print(f" → {len(products)} products found")
 
-        # Process each product
         for url in products:
             html = await fetch_page(crawler, url)
             if not html:
@@ -86,30 +91,43 @@ async def main():
             ).execute()
             print(f"  • Stored product: {data['name']}")
 
-            # Prepare slug for Torob search
+            # Use slug for Torob search
             slug = url.rsplit('/product/', 1)[-1]
             try:
-                torob_res = torob.search(slug, page=0).get('results', [])
+                search_res = torob.search(slug, page=0).get('results', [])
             except requests.exceptions.HTTPError as e:
-                print(f"    ↳ Torob API error for '{slug}': {e}")
+                print(f"    ↳ Torob search error for '{slug}': {e}")
                 continue
 
-            # Upsert competitor prices
-            for item in torob_res:
-                seller = item.get('seller_name') or 'unknown'
+            # For each search result, fetch detailed offers to get seller names
+            for item in search_res:
+                prk = item.get('prk')
+                if not prk:
+                    continue
                 try:
-                    price = int(item.get('price', 0))
-                except (TypeError, ValueError):
-                    price = 0
-                supabase.table('competitor_prices').upsert(
-                    {
-                        'product_slug': slug,
-                        'competitor_name': seller,
-                        'competitor_price': price
-                    },
-                    on_conflict='product_slug,competitor_name'
-                ).execute()
-                print(f"    ↳ {seller}: {price}")
+                    detail = torob.details(prk=prk)
+                except requests.exceptions.HTTPError as e:
+                    print(f"    ↳ Torob details error for prk {prk}: {e}")
+                    continue
+
+                # The detail response contains 'offers' list with seller_name and price
+                offers = detail.get('offers', []) or detail.get('prices', [])
+                for offer in offers:
+                    seller = offer.get('seller_name') or offer.get('store_name') or 'unknown'
+                    try:
+                        price = int(offer.get('price', 0))
+                    except (TypeError, ValueError):
+                        price = 0
+
+                    supabase.table('competitor_prices').upsert(
+                        {
+                            'product_slug': slug,
+                            'competitor_name': seller,
+                            'competitor_price': price
+                        },
+                        on_conflict='product_slug,competitor_name'
+                    ).execute()
+                    print(f"    ↳ {seller}: {price}")
 
 if __name__ == '__main__':
     asyncio.run(main())
