@@ -7,7 +7,7 @@ from supabase import create_client, Client
 from torob_integration.api import Torob
 import requests
 
-# --- Supabase setup (use Service Role key to bypass RLS) ---
+# --- Supabase setup (Service Role key bypasses RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -70,7 +70,7 @@ async def main():
     categories = extract_category_links(homepage, base_url)
     print(f"[INFO] Found {len(categories)} categories")
 
-    # Loop categories
+    # Loop through categories
     for cat_url in categories:
         print(f"\n[CATEGORY] {cat_url}")
         cat_html = await fetch_page(crawler, cat_url)
@@ -79,7 +79,7 @@ async def main():
         products = extract_product_links(cat_html, base_url)
         print(f" → {len(products)} products found")
 
-        # Loop products
+        # Loop through products
         for url in products:
             html = await fetch_page(crawler, url)
             if not html:
@@ -87,27 +87,32 @@ async def main():
             data = extract_product_data(html)
             data['url'] = url
 
-            # Upsert product (insert or update by url)
+            # Upsert product
             supabase.table('products').upsert(
                 data,
                 on_conflict='url'
             ).execute()
             print(f"  • Stored product: {data['name']}")
 
-            # Prepare slug for Torob
-            slug = url.split('/product/',1)[-1]
+            # Prepare slug for Torob search
+            slug = url.split('/product/', 1)[-1]
             try:
-                torob_res = torob.search(q=slug, page=0).get('results', [])
+                res = torob.search(q=slug, page=0)
+                torob_res = res.get('results', [])
             except requests.exceptions.HTTPError as e:
                 print(f"    ↳ Torob API error for '{slug}': {e}")
                 continue
 
             # Upsert competitor prices
             for item in torob_res:
-                seller = (item.get('seller_name')
-                          or item.get('seller')
-                          or item.get('shop_name')
-                          or 'unknown')
+                seller = (
+                    item.get('seller')
+                    or item.get('seller_name')
+                    or item.get('shop_name')
+                    or item.get('store')
+                    or item.get('store_name')
+                    or 'unknown'
+                )
                 try:
                     comp_price = int(item.get('price', 0))
                 except (TypeError, ValueError):
