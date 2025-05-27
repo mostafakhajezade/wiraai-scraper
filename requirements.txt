@@ -4,3 +4,4 @@ crawl4ai[playwright]
 crawl4ai
 playwright
 supabase
+torob-integration
