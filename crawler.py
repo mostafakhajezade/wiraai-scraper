@@ -29,24 +29,14 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 # --- Extract category links from homepage ---
 def extract_category_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = []
-    for a in soup.select("a[href^='/category/']"):
-        href = a.get('href')
-        full = base_url.rstrip('/') + href
-        if full not in links:
-            links.append(full)
-    return links
+    links = {base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/category/']")}
+    return list(links)
 
 # --- Extract product links from a category page ---
 def extract_product_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = []
-    for a in soup.select("a[href^='/product/']"):
-        href = a.get('href')
-        full = base_url.rstrip('/') + href
-        if full not in links:
-            links.append(full)
-    return links
+    links = {base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/product/']")}
+    return list(links)
 
 # --- Extract product data (name and price) ---
 def extract_product_data(html: str) -> dict:
@@ -56,7 +46,8 @@ def extract_product_data(html: str) -> dict:
     price_el = soup.select_one("div.styles__price___1uiIp.js-price")
     raw = price_el.text.strip() if price_el else "0"
     num = re.sub(r"[^\d]", "", persian_to_english_numbers(raw))
-    return {"name": name, "price": num}
+    price = int(num) if num else 0
+    return {"name": name, "price": price}
 
 # --- Main async routine ---
 async def main():
@@ -69,7 +60,6 @@ async def main():
     if not homepage:
         return
     categories = extract_category_links(homepage, base_url)
-
     print(f"[INFO] Found {len(categories)} categories")
 
     # Loop through each category
@@ -94,9 +84,9 @@ async def main():
                 data,
                 on_conflict='url'
             ).execute()
-            print(f"  • Stored: {data['name']}")
+            print(f"  • Stored product: {data['name']}")
 
-            # Attempt fetching competitor prices via Torob
+            # Prepare slug for Torob search
             slug = url.rsplit('/product/', 1)[-1]
             try:
                 torob_res = torob.search(slug, page=0).get('results', [])
