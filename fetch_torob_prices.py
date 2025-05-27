@@ -8,9 +8,20 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # List of your product slugs (last segment of product URLs)
+# You can auto-extract slugs from your existing crawler output URLs:
+# Example: if you have a list of full URLs, use:
+#
+#   full_urls = [
+#       "https://wiraa.ir/product/آبمیوه-گیر-Green-lion-مدل-MEGA-PRO",
+#       "https://wiraa.ir/product/تیغ-اصلاح-گرین-لاین",
+#       # ...
+#   ]
+#   PRODUCT_SLUGS = [url.rsplit('/product/', 1)[1] for url in full_urls]
+#
+# Or manually list them:
 PRODUCT_SLUGS = [
     # e.g. "آبمیوه-گیر-Green-lion-مدل-MEGA-PRO",
-    # extract these from your inventory
+    # "تیغ-اصلاح-گرین-لاین",
 ]
 
 # Upsert a competitor price record
