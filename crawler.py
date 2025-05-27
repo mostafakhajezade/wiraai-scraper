@@ -49,6 +49,7 @@ def extract_product_links(html: str, base_url: str) -> list[str]:
 # --- Extract product name & price ---
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
+    # Title selector updated
     title_el = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
     name = title_el.text.strip() if title_el else "No Name"
     price_el = soup.select_one("div.styles__price___1uiIp.js-price")
@@ -70,7 +71,6 @@ async def main():
     categories = extract_category_links(homepage, base_url)
     print(f"[INFO] Found {len(categories)} categories")
 
-    # Loop through categories
     for cat_url in categories:
         print(f"\n[CATEGORY] {cat_url}")
         cat_html = await fetch_page(crawler, cat_url)
@@ -79,7 +79,6 @@ async def main():
         products = extract_product_links(cat_html, base_url)
         print(f" → {len(products)} products found")
 
-        # Loop through products
         for url in products:
             html = await fetch_page(crawler, url)
             if not html:
@@ -87,14 +86,14 @@ async def main():
             data = extract_product_data(html)
             data['url'] = url
 
-            # Upsert product
+            # Upsert product record
             supabase.table('products').upsert(
                 data,
                 on_conflict='url'
             ).execute()
             print(f"  • Stored product: {data['name']}")
 
-            # Prepare slug for Torob search
+            # Prepare slug and fetch Torob
             slug = url.split('/product/', 1)[-1]
             try:
                 res = torob.search(q=slug, page=0)
@@ -103,29 +102,42 @@ async def main():
                 print(f"    ↳ Torob API error for '{slug}': {e}")
                 continue
 
-            # Upsert competitor prices
+            # Inspect and process each Torob item
             for item in torob_res:
-                seller = (
-                    item.get('seller')
-                    or item.get('seller_name')
-                    or item.get('shop_name')
-                    or item.get('store')
-                    or item.get('store_name')
-                    or 'unknown'
-                )
-                try:
-                    comp_price = int(item.get('price', 0))
-                except (TypeError, ValueError):
-                    comp_price = 0
-                supabase.table('competitor_prices').upsert(
-                    {
-                        'product_slug': slug,
-                        'competitor_name': seller,
-                        'competitor_price': comp_price
-                    },
-                    on_conflict='product_slug,competitor_name'
-                ).execute()
-                print(f"    ↳ {seller}: {comp_price}")
+                print("    [DEBUG] Torob item keys:", list(item.keys()))
+                # If shops list exists, iterate
+                shops = item.get('shops') or []
+                if shops:
+                    for shop in shops:
+                        seller = shop.get('name') or shop.get('seller_name') or 'unknown'
+                        comp_price = shop.get('price') or 0
+                        supabase.table('competitor_prices').upsert(
+                            {
+                                'product_slug': slug,
+                                'competitor_name': seller,
+                                'competitor_price': comp_price
+                            },
+                            on_conflict='product_slug,competitor_name'
+                        ).execute()
+                        print(f"    ↳ {seller}: {comp_price}")
+                else:
+                    # Fallback single level fields
+                    seller = (
+                        item.get('seller')
+                        or item.get('seller_name')
+                        or item.get('shop_name')
+                        or 'unknown'
+                    )
+                    comp_price = item.get('price') or 0
+                    supabase.table('competitor_prices').upsert(
+                        {
+                            'product_slug': slug,
+                            'competitor_name': seller,
+                            'competitor_price': comp_price
+                        },
+                        on_conflict='product_slug,competitor_name'
+                    ).execute()
+                    print(f"    ↳ {seller}: {comp_price}")
 
 if __name__ == '__main__':
     asyncio.run(main())
