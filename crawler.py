@@ -31,18 +31,26 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 # --- Extract category links ---
 def extract_category_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    return list({base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/category/']")})
+    links = set()
+    for a in soup.select("a[href^='/category/']"):
+        href = a['href']
+        links.add(base_url.rstrip('/') + href)
+    return list(links)
 
 # --- Extract product links ---
 def extract_product_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    return list({base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/product/']")})
+    links = set()
+    for a in soup.select("a[href^='/product/']"):
+        href = a['href']
+        links.add(base_url.rstrip('/') + href)
+    return list(links)
 
 # --- Extract product name & price ---
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
-    title = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
-    name = title.text.strip() if title else "No Name"
+    title_el = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
+    name = title_el.text.strip() if title_el else "No Name"
     price_el = soup.select_one("div.styles__price___1uiIp.js-price")
     raw = price_el.text.strip() if price_el else "0"
     num = re.sub(r"[^\d]", "", persian_to_english_numbers(raw))
@@ -89,33 +97,30 @@ async def main():
             # Prepare slug for Torob
             slug = url.split('/product/',1)[-1]
             try:
-                torob_res = torob.search(slug, page=0).get('results', [])
+                torob_res = torob.search(q=slug, page=0).get('results', [])
             except requests.exceptions.HTTPError as e:
                 print(f"    ↳ Torob API error for '{slug}': {e}")
                 continue
 
             # Upsert competitor prices
             for item in torob_res:
-                seller = (
-                    item.get('seller_name')
-                    or item.get('seller')
-                    or item.get('market')
-                    or item.get('shop_name')
-                    or 'unknown'
-                )
+                seller = (item.get('seller_name')
+                          or item.get('seller')
+                          or item.get('shop_name')
+                          or 'unknown')
                 try:
-                    price = int(item.get('price', 0))
+                    comp_price = int(item.get('price', 0))
                 except (TypeError, ValueError):
-                    price = 0
+                    comp_price = 0
                 supabase.table('competitor_prices').upsert(
                     {
                         'product_slug': slug,
                         'competitor_name': seller,
-                        'competitor_price': price
+                        'competitor_price': comp_price
                     },
                     on_conflict='product_slug,competitor_name'
                 ).execute()
-                print(f"    ↳ {seller}: {price}")
+                print(f"    ↳ {seller}: {comp_price}")
 
 if __name__ == '__main__':
     asyncio.run(main())
