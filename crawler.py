@@ -101,36 +101,19 @@ async def main():
                 print(f"    ↳ Torob API error for '{slug}': {e}")
                 continue
 
-            # For each Torob result, get shop details
-            for item in torob_res:
-                prk = item.get('prk')
-                search_id = item.get('search_id')
-                shops_list = []
-                try:
-                    details = torob.details(prk=prk, search_id=search_id)
-                    shops_list = details.get('shops', [])
-                except requests.exceptions.HTTPError as e:
-                    print(f"    ↳ Torob details error for '{slug}': {e}")
-                # fallback if no shops
-                if not shops_list:
-                    shops_list = [{
-                        'name': item.get('shop_text') or 'unknown',
-                        'price': item.get('price') or 0
-                    }]
-
-                # Only take first 3 shops
-                for shop in shops_list[:3]:
-                    seller = shop.get('seller') or shop.get('name') or 'unknown'
-                    comp_price = shop.get('price') or 0
-                    supabase.table('competitor_prices').upsert(
-                        {
-                            'product_slug': slug,
-                            'competitor_name': seller,
-                            'competitor_price': comp_price
-                        },
-                        on_conflict='product_slug,competitor_name'
-                    ).execute()
-                    print(f"    ↳ {seller}: {comp_price}")
+            # Process first 3 competitor shops
+            for item in torob_res[:3]:
+                seller = item.get('shop_text') or 'unknown'
+                comp_price = item.get('price') or 0
+                supabase.table('competitor_prices').upsert(
+                    {
+                        'product_slug': slug,
+                        'competitor_name': seller,
+                        'competitor_price': comp_price
+                    },
+                    on_conflict='product_slug,competitor_name'
+                ).execute()
+                print(f"    ↳ {seller}: {comp_price}")
 
 if __name__ == '__main__':
     asyncio.run(main())
