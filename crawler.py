@@ -92,7 +92,7 @@ async def main():
             ).execute()
             print(f"  • Stored product: {data['name']}")
 
-            # Prepare slug for Torob queries
+            # Torob integration
             slug = url.split('/product/', 1)[-1]
             try:
                 resp = torob.search(q=slug, page=0)
@@ -101,9 +101,8 @@ async def main():
                 print(f"    ↳ Torob API error for '{slug}': {e}")
                 continue
 
-            # Process each Torob result and fetch detailed shops
+            # For each Torob result, get shop details
             for item in torob_res:
-                print("    [DEBUG] Torob item keys:", list(item.keys()))
                 prk = item.get('prk')
                 search_id = item.get('search_id')
                 shops_list = []
@@ -112,12 +111,15 @@ async def main():
                     shops_list = details.get('shops', [])
                 except requests.exceptions.HTTPError as e:
                     print(f"    ↳ Torob details error for '{slug}': {e}")
+                # fallback if no shops
                 if not shops_list:
                     shops_list = [{
                         'name': item.get('shop_text') or 'unknown',
                         'price': item.get('price') or 0
                     }]
-                for shop in shops_list:
+
+                # Only take first 3 shops
+                for shop in shops_list[:3]:
                     seller = shop.get('seller') or shop.get('name') or 'unknown'
                     comp_price = shop.get('price') or 0
                     supabase.table('competitor_prices').upsert(
