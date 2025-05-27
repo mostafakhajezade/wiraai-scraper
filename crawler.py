@@ -7,10 +7,12 @@ from supabase import create_client, Client
 from torob_integration.api import Torob
 import requests
 
-# --- Supabase setup ---
+# --- Supabase setup (use service role key to bypass RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+if not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError("Missing SUPABASE_SERVICE_ROLE_KEY env var")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # --- Helper to convert Persian numbers ---
 def persian_to_english_numbers(text: str) -> str:
@@ -29,20 +31,12 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 # --- Extract category links from homepage ---
 def extract_category_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = {
-        base_url.rstrip('/') + a['href']
-        for a in soup.select("a[href^='/category/']")
-    }
-    return list(links)
+    return list({ base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/category/']") })
 
 # --- Extract product links from a category page ---
 def extract_product_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = {
-        base_url.rstrip('/') + a['href']
-        for a in soup.select("a[href^='/product/']")
-    }
-    return list(links)
+    return list({ base_url.rstrip('/') + a['href'] for a in soup.select("a[href^='/product/']") })
 
 # --- Extract product data (name and price) ---
 def extract_product_data(html: str) -> dict:
