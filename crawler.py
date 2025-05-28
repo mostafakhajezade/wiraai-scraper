@@ -34,6 +34,7 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 
 # --- Extract links matching a CSS selector ---
 def extract_links(html: str, selector: str, base_url: str) -> list[str]:
+    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     links = []
     for a in soup.select(selector):
@@ -46,6 +47,7 @@ def extract_links(html: str, selector: str, base_url: str) -> list[str]:
 
 # --- Extract product data ---
 def extract_product_data(html: str) -> dict:
+    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     title_el = soup.select_one('h1[data-product="title"]')
     name = title_el.text.strip() if title_el else "No Name"
@@ -108,12 +110,11 @@ async def main():
             for item in filtered[:3]:
                 comp_price = item.get('price', 0)
                 raw_shop = (item.get('shop_text') or '').strip()
-                # prefer HTML link for detail page
                 link_path = item.get('web_client_absolute_url') or item.get('more_info_url')
 
                 seller = raw_shop or 'unknown'
 
-                # If this is a multi-store entry, follow the Torob page and extract names
+                # Handle multi-store entries
                 if 'فروشگاه' in raw_shop and link_path:
                     detail_url = link_path if link_path.startswith('http') else 'https://torob.com' + link_path
                     print(f"    [DEBUG] following multi-store link: {detail_url}")
@@ -121,11 +122,9 @@ async def main():
                     if detail_html:
                         dsoup = BeautifulSoup(detail_html, 'html.parser')
                         shops = []
-                        # Torob shop links usually contain /shop/
                         for a_tag in dsoup.select('a[href*="/shop/"]'):
-                            name = a_tag.get_text(separator=' ', strip=True)
-                            # drop any city info after comma
-                            clean = name.split(',')[0].strip()
+                            name_text = a_tag.get_text(separator=' ', strip=True)
+                            clean = name_text.split(',')[0].strip()
                             if clean and clean not in shops:
                                 shops.append(clean)
                             if len(shops) == 3:
