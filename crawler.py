@@ -32,10 +32,17 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
     print(f"[ERROR] couldn't fetch {url}")
     return ""
 
-# --- Extract links ---
+# --- Extract links matching a CSS selector ---
 def extract_links(html: str, selector: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    return list({ base_url.rstrip('/') + a['href'] for a in soup.select(selector) if a.get('href') })
+    links = []
+    for a in soup.select(selector):
+        href = a.get('href')
+        if href:
+            full = href if href.startswith('http') else base_url.rstrip('/') + href
+            if full not in links:
+                links.append(full)
+    return links
 
 # --- Extract product data ---
 def extract_product_data(html: str) -> dict:
@@ -99,25 +106,24 @@ async def main():
 
             # 5) Take top 3 matches, resolve store names
             for item in filtered[:3]:
-                raw_seller = item.get('shop_text','') or item.get('direct_cta','unknown')
+                raw_seller = item.get('shop_text') or item.get('direct_cta', '')
                 comp_price = item.get('price', 0)
 
-                # If summary like "در X فروشگاه", fetch the detail page and parse first 3 sellers
-                if raw_seller.startswith('در'):
-                    # get hyperlink to detail
+                # If summary like "در X فروشگاه", fetch detail page and parse first 3 sellers
+                if raw_seller and raw_seller.startswith('در'):
                     detail_path = item.get('more_info_url') or item.get('web_client_absolute_url')
+                    seller = raw_seller
                     if detail_path:
                         detail_url = detail_path if detail_path.startswith('http') else 'https://torob.com' + detail_path
                         detail_html = await fetch_page(crawler, detail_url)
                         detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                        # parse shop names (adjust selector as needed)
-                        shop_elems = detail_soup.select('a.styles__sellerName___3q1Ob')
-                        shops = [e.text.strip() for e in shop_elems][:3]
-                        seller = ', '.join(shops) if shops else raw_seller
-                    else:
-                        seller = raw_seller
+                        # parse seller links (adjust CSS selector accordingly)
+                        shop_elems = detail_soup.select('a[href*="/shop/"]')
+                        shops = [e.text.strip() for e in shop_elems if e.text.strip()][:3]
+                        if shops:
+                            seller = ', '.join(shops)
                 else:
-                    seller = raw_seller
+                    seller = raw_seller or 'unknown'
 
                 # Upsert competitor prices
                 supabase.table('competitor_prices').upsert(
