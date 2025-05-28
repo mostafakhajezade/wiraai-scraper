@@ -47,7 +47,7 @@ def extract_links(html: str, selector: str, base_url: str) -> list[str]:
 # --- Extract product data ---
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
-    title_el = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
+    title_el = soup.select_one('h1[data-product="title"]')
     name = title_el.text.strip() if title_el else "No Name"
     price_el = soup.select_one("div.styles__price___1uiIp.js-price")
     raw = price_el.text.strip() if price_el else "0"
@@ -106,24 +106,21 @@ async def main():
 
             # 5) Take top 3 matches, resolve store names
             for item in filtered[:3]:
-                raw_seller = item.get('shop_text') or item.get('direct_cta', '')
                 comp_price = item.get('price', 0)
+                raw_seller = item.get('shop_text','') or item.get('price_prefix','')
+                seller = raw_seller or 'unknown'
 
-                # If summary like "در X فروشگاه", fetch detail page and parse first 3 sellers
-                if raw_seller and raw_seller.startswith('در'):
-                    detail_path = item.get('more_info_url') or item.get('web_client_absolute_url')
-                    seller = raw_seller
-                    if detail_path:
-                        detail_url = detail_path if detail_path.startswith('http') else 'https://torob.com' + detail_path
+                # If summary like "در X فروشگاه", fetch Torob product page for store list
+                if seller.startswith('در'):
+                    web_url = item.get('web_client_absolute_url')
+                    if web_url:
+                        detail_url = web_url if web_url.startswith('http') else 'https://torob.com' + web_url
                         detail_html = await fetch_page(crawler, detail_url)
                         detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                        # parse seller links (adjust CSS selector accordingly)
-                        shop_elems = detail_soup.select('a[href*="/shop/"]')
-                        shops = [e.text.strip() for e in shop_elems if e.text.strip()][:3]
+                        # Select first 3 shop names from the Torob listing page
+                        shops = [a.text.strip() for a in detail_soup.select('a[href*="/shop/"]') if a.text.strip()][:3]
                         if shops:
                             seller = ', '.join(shops)
-                else:
-                    seller = raw_seller or 'unknown'
 
                 # Upsert competitor prices
                 supabase.table('competitor_prices').upsert(
