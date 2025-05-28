@@ -1,13 +1,14 @@
 import os
 import re
 import asyncio
+from difflib import SequenceMatcher
 from crawl4ai import AsyncWebCrawler
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
 import requests
 
-# --- Supabase setup (Service Role key bypasses RLS) ---
+# --- Supabase setup (Service Role bypasses RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -20,7 +21,11 @@ def persian_to_english_numbers(text: str) -> str:
     english = "0123456789"
     return text.translate(str.maketrans(persian, english))
 
-# --- Fetch a page via Crawl4AI ---
+# --- Helper: fuzzy similarity ---
+def similar(a: str, b: str) -> float:
+    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+# --- Fetch via Crawl4AI ---
 async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
     res = await crawler.arun(url)
     if res.success:
@@ -28,25 +33,12 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
     print(f"[ERROR] couldn't fetch {url}")
     return ""
 
-# --- Extract category links ---
-def extract_category_links(html: str, base_url: str) -> list[str]:
+# --- Extract links ---
+def extract_links(html: str, selector: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = set()
-    for a in soup.select("a[href^='/category/']"):
-        href = a['href']
-        links.add(base_url.rstrip('/') + href)
-    return list(links)
+    return list({ base_url.rstrip('/') + a['href'] for a in soup.select(selector) if a.get('href') })
 
-# --- Extract product links ---
-def extract_product_links(html: str, base_url: str) -> list[str]:
-    soup = BeautifulSoup(html, "html.parser")
-    links = set()
-    for a in soup.select("a[href^='/product/']"):
-        href = a['href']
-        links.add(base_url.rstrip('/') + href)
-    return list(links)
-
-# --- Extract product name & price ---
+# --- Extract product data ---
 def extract_product_data(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     title_el = soup.select_one('h1[data-product="title"].styles__title___1LiMX')
@@ -57,43 +49,40 @@ def extract_product_data(html: str) -> dict:
     price = int(num) if num else 0
     return {"name": name, "price": price}
 
-# --- Main routine ---
+# --- Main ---
 async def main():
     base_url = "https://wiraa.ir"
     crawler = AsyncWebCrawler()
     torob = Torob()
 
-    # Fetch homepage and categories
-    homepage = await fetch_page(crawler, base_url)
-    if not homepage:
+    # 1) Categories
+    home = await fetch_page(crawler, base_url)
+    if not home:
         return
-    categories = extract_category_links(homepage, base_url)
+    categories = extract_links(home, "a[href^='/category/']", base_url)
     print(f"[INFO] Found {len(categories)} categories")
 
-    for cat_url in categories:
-        print(f"\n[CATEGORY] {cat_url}")
-        cat_html = await fetch_page(crawler, cat_url)
-        if not cat_html:
+    for cat in categories:
+        print(f"\n[CATEGORY] {cat}")
+        ch = await fetch_page(crawler, cat)
+        if not ch:
             continue
-        products = extract_product_links(cat_html, base_url)
+        products = extract_links(ch, "a[href^='/product/']", base_url)
         print(f" → {len(products)} products found")
 
         for url in products:
             html = await fetch_page(crawler, url)
             if not html:
                 continue
-            data = extract_product_data(html)
-            data['url'] = url
+            product = extract_product_data(html)
+            slug = url.split('/product/',1)[-1]
+            product['url'] = url
 
-            # Upsert product record
-            supabase.table('products').upsert(
-                data,
-                on_conflict='url'
-            ).execute()
-            print(f"  • Stored product: {data['name']}")
+            # Upsert product
+            supabase.table('products').upsert(product, on_conflict='url').execute()
+            print(f"  • Stored product: {product['name']}")
 
-            # Torob integration
-            slug = url.split('/product/', 1)[-1]
+            # 2) Torob search
             try:
                 resp = torob.search(q=slug, page=0)
                 torob_res = resp.get('results', [])
@@ -101,16 +90,21 @@ async def main():
                 print(f"    ↳ Torob API error for '{slug}': {e}")
                 continue
 
-            # Process first 3 competitor shops
-            for item in torob_res[:3]:
-                seller = item.get('shop_text') or 'unknown'
+            # 3) Filter to exact matches
+            filtered = []
+            for item in torob_res:
+                name1 = item.get('name1','').strip()
+                if similar(name1, product['name']) >= 0.6:
+                    filtered.append(item)
+            if not filtered:
+                filtered = torob_res
+
+            # 4) Store top 3 competitor prices
+            for item in filtered[:3]:
+                seller = item.get('shop_text') or item.get('direct_cta','unknown')
                 comp_price = item.get('price') or 0
                 supabase.table('competitor_prices').upsert(
-                    {
-                        'product_slug': slug,
-                        'competitor_name': seller,
-                        'competitor_price': comp_price
-                    },
+                    {'product_slug': slug, 'competitor_name': seller, 'competitor_price': comp_price},
                     on_conflict='product_slug,competitor_name'
                 ).execute()
                 print(f"    ↳ {seller}: {comp_price}")
