@@ -84,25 +84,29 @@ async def main():
 
             # 2) Torob search
             try:
-                resp = torob.search(q=slug, page=0)
+                resp = torob.search(q=product['name'], page=0)
                 torob_res = resp.get('results', [])
             except requests.exceptions.HTTPError as e:
-                print(f"    ↳ Torob API error for '{slug}': {e}")
+                print(f"    ↳ Torob API error for '{product['name']}': {e}")
                 continue
 
-            # 3) Filter to exact matches
-            filtered = []
-            for item in torob_res:
-                name1 = item.get('name1','').strip()
-                if similar(name1, product['name']) >= 0.6:
-                    filtered.append(item)
+            # 3) Filter to fuzzy matches
+            filtered = [item for item in torob_res if similar(item.get('name1',''), product['name']) >= 0.6]
             if not filtered:
                 filtered = torob_res
 
-            # 4) Store top 3 competitor prices
+            # 4) Store top 3 competitor prices with real names
             for item in filtered[:3]:
                 seller = item.get('shop_text') or item.get('direct_cta','unknown')
-                comp_price = item.get('price') or 0
+                # if summary says "در X فروشگاه", fetch detail page
+                if seller.startswith('در') and item.get('prk') and item.get('search_id'):
+                    try:
+                        detail = torob.details(prk=item['prk'], search_id=item['search_id'])
+                        shops = [d.get('shop_text') or d.get('shop_name','') for d in detail.get('items', [])]
+                        seller = ', '.join(shops[:3]) if shops else seller
+                    except Exception as e:
+                        print(f"    [ERROR] could fetch detail for '{seller}': {e}")
+                comp_price = item.get('price', 0)
                 supabase.table('competitor_prices').upsert(
                     {'product_slug': slug, 'competitor_name': seller, 'competitor_price': comp_price},
                     on_conflict='product_slug,competitor_name'
