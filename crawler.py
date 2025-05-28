@@ -104,23 +104,23 @@ async def main():
             if not filtered:
                 filtered = torob_results
 
-            # 5) Take top 3 matches, resolve store names
+            # 5) Take top 3 matches, resolve store names from API details
             for item in filtered[:3]:
                 comp_price = item.get('price', 0)
-                raw_seller = item.get('shop_text','') or item.get('price_prefix','')
-                seller = raw_seller or 'unknown'
+                seller = 'unknown'
 
-                # If summary like "در X فروشگاه", fetch Torob product page for store list
-                if seller.startswith('در'):
-                    web_url = item.get('web_client_absolute_url')
-                    if web_url:
-                        detail_url = web_url if web_url.startswith('http') else 'https://torob.com' + web_url
-                        detail_html = await fetch_page(crawler, detail_url)
-                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                        # Select first 3 shop names from the Torob listing page
-                        shops = [a.text.strip() for a in detail_soup.select('a[href*="/shop/"]') if a.text.strip()][:3]
-                        if shops:
-                            seller = ', '.join(shops)
+                # If summary like "در X فروشگاه", fetch detailed shops via API
+                raw_shop = item.get('shop_text','') or item.get('price_prefix','')
+                if raw_shop.startswith('در') and 'prk' in item and 'search_id' in item:
+                    try:
+                        details = torob.details(prk=item['prk'], search_id=item['search_id'])
+                        shops_list = details.get('shops', [])
+                        # Extract first 3 shop names
+                        seller = ', '.join(shop.get('seller_name','').strip() for shop in shops_list[:3] if shop.get('seller_name'))
+                    except Exception as e:
+                        print(f"    ↳ Torob details error: {e}")
+                else:
+                    seller = item.get('shop_text','') or item.get('price_prefix','') or seller
 
                 # Upsert competitor prices
                 supabase.table('competitor_prices').upsert(
