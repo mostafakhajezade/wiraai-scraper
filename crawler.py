@@ -102,16 +102,19 @@ async def main():
                 raw_seller = item.get('shop_text','') or item.get('direct_cta','unknown')
                 comp_price = item.get('price', 0)
 
-                # if summary text like "در X فروشگاه", fetch details
-                if raw_seller.startswith('در') and item.get('prk') and item.get('search_id'):
-                    try:
-                        detail = torob.details(prk=item['prk'], search_id=item['search_id'])
-                        detail_items = detail.get('items', [])
-                        # extract first 3 real shop names
-                        shops = [d.get('shop_name') or d.get('shop_text') for d in detail_items]
-                        seller = ', '.join(shops[:3]) if shops else raw_seller
-                    except Exception as e:
-                        print(f"    [ERROR] fetching detail for '{raw_seller}': {e}")
+                # If summary like "در X فروشگاه", fetch the detail page and parse first 3 sellers
+                if raw_seller.startswith('در'):
+                    # get hyperlink to detail
+                    detail_path = item.get('more_info_url') or item.get('web_client_absolute_url')
+                    if detail_path:
+                        detail_url = detail_path if detail_path.startswith('http') else 'https://torob.com' + detail_path
+                        detail_html = await fetch_page(crawler, detail_url)
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        # parse shop names (adjust selector as needed)
+                        shop_elems = detail_soup.select('a.styles__sellerName___3q1Ob')
+                        shops = [e.text.strip() for e in shop_elems][:3]
+                        seller = ', '.join(shops) if shops else raw_seller
+                    else:
                         seller = raw_seller
                 else:
                     seller = raw_seller
