@@ -84,7 +84,7 @@ async def main():
                 continue
 
             product = extract_product_data(html)
-            slug = prod_url.split('/product/',1)[-1]
+            slug = prod_url.split('/product/', 1)[-1]
             product['url'] = prod_url
 
             # Upsert product record
@@ -107,26 +107,27 @@ async def main():
             # 5) Take top 3 matches, resolve store names
             for item in filtered[:3]:
                 comp_price = item.get('price', 0)
-                raw_shop = item.get('shop_text') or ''
+                raw_shop = (item.get('shop_text') or '').strip()
                 more_path = item.get('more_info_url') or item.get('web_client_absolute_url')
 
-                # If summary shows "در X فروشگاه", follow link to get individual shop names
-                if raw_shop.strip().startswith('در') and more_path:
+                seller = raw_shop or 'unknown'
+                # If summary indicates a multi-store link, fetch detail page
+                if raw_shop.startswith('در') and more_path:
                     more_url = more_path if more_path.startswith('http') else 'https://torob.com' + more_path
                     detail_html = await fetch_page(crawler, more_url)
-                    dsoup = BeautifulSoup(detail_html, 'html.parser')
-
-                    sellers = []
-                    # Find individual shop links in detail page
-                    for a_tag in dsoup.select('a[href*="/shop/"]'):
-                        name = a_tag.text.strip()
-                        if name:
-                            sellers.append(name)
-                        if len(sellers) == 3:
-                            break
-                    seller = ', '.join(sellers) if sellers else raw_shop
-                else:
-                    seller = raw_shop if raw_shop else 'unknown'
+                    if detail_html:
+                        dsoup = BeautifulSoup(detail_html, 'html.parser')
+                        shops = []
+                        for a_tag in dsoup.select('a[href*="/shop/"]'):
+                            name = a_tag.get_text(strip=True)
+                            # remove any city-only fragments
+                            parts = [p.strip() for p in name.split(',') if p.strip()]
+                            if parts:
+                                shops.append(parts[0])
+                            if len(shops) == 3:
+                                break
+                        if shops:
+                            seller = ', '.join(shops)
 
                 # Upsert competitor prices
                 supabase.table('competitor_prices').upsert(
