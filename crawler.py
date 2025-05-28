@@ -104,42 +104,29 @@ async def main():
             if not filtered:
                 filtered = torob_results
 
-            # 5) Take top 3 matches, resolve store names from detail page
+            # 5) Take top 3 matches, resolve store names
             for item in filtered[:3]:
                 comp_price = item.get('price', 0)
-                seller = 'unknown'
-
-                raw_shop = item.get('shop_text', '') or item.get('price_prefix', '')
+                raw_shop = item.get('shop_text') or ''
                 more_path = item.get('more_info_url') or item.get('web_client_absolute_url')
 
+                # If summary shows "در X فروشگاه", follow link to get individual shop names
                 if raw_shop.strip().startswith('در') and more_path:
                     more_url = more_path if more_path.startswith('http') else 'https://torob.com' + more_path
                     detail_html = await fetch_page(crawler, more_url)
                     dsoup = BeautifulSoup(detail_html, 'html.parser')
 
-                    # find seller links or grouped shop names
                     sellers = []
-                    city = (item.get('delivery_city_name') or '').strip()
-                    for a_tag in dsoup.select('a[href^="/shops/"]'):
-                        text = a_tag.text.strip()
-                        if not text:
-                            continue
-                        if ',' in text:
-                            parts = [p.strip() for p in text.split(',') if p.strip()]
-                            for part in parts:
-                                if city and part == city:
-                                    continue
-                                sellers.append(part)
-                                if len(sellers) == 3:
-                                    break
-                        else:
-                            sellers.append(text)
+                    # Find individual shop links in detail page
+                    for a_tag in dsoup.select('a[href*="/shop/"]'):
+                        name = a_tag.text.strip()
+                        if name:
+                            sellers.append(name)
                         if len(sellers) == 3:
                             break
-
                     seller = ', '.join(sellers) if sellers else raw_shop
                 else:
-                    seller = raw_shop or seller
+                    seller = raw_shop if raw_shop else 'unknown'
 
                 # Upsert competitor prices
                 supabase.table('competitor_prices').upsert(
