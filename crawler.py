@@ -6,7 +6,6 @@ from crawl4ai import AsyncWebCrawler
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
-import requests
 
 # --- Supabase setup (Service Role bypasses RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -49,66 +48,81 @@ def extract_product_data(html: str) -> dict:
     price = int(num) if num else 0
     return {"name": name, "price": price}
 
-# --- Main ---
+# --- Main crawler logic ---
 async def main():
     base_url = "https://wiraa.ir"
     crawler = AsyncWebCrawler()
     torob = Torob()
 
-    # 1) Categories
-    home = await fetch_page(crawler, base_url)
-    if not home:
+    # 1) Get categories
+    home_html = await fetch_page(crawler, base_url)
+    if not home_html:
         return
-    categories = extract_links(home, "a[href^='/category/']", base_url)
+    categories = extract_links(home_html, "a[href^='/category/']", base_url)
     print(f"[INFO] Found {len(categories)} categories")
 
-    for cat in categories:
-        print(f"\n[CATEGORY] {cat}")
-        ch = await fetch_page(crawler, cat)
-        if not ch:
+    # 2) Iterate each category
+    for cat_url in categories:
+        print(f"\n[CATEGORY] {cat_url}")
+        cat_html = await fetch_page(crawler, cat_url)
+        if not cat_html:
             continue
-        products = extract_links(ch, "a[href^='/product/']", base_url)
+
+        products = extract_links(cat_html, "a[href^='/product/']", base_url)
         print(f" → {len(products)} products found")
 
-        for url in products:
-            html = await fetch_page(crawler, url)
+        for prod_url in products:
+            html = await fetch_page(crawler, prod_url)
             if not html:
                 continue
-            product = extract_product_data(html)
-            slug = url.split('/product/',1)[-1]
-            product['url'] = url
 
-            # Upsert product
+            product = extract_product_data(html)
+            slug = prod_url.split('/product/',1)[-1]
+            product['url'] = prod_url
+
+            # Upsert product record
             supabase.table('products').upsert(product, on_conflict='url').execute()
             print(f"  • Stored product: {product['name']}")
 
-            # 2) Torob search
+            # 3) Query Torob for competitor prices
             try:
                 resp = torob.search(q=product['name'], page=0)
-                torob_res = resp.get('results', [])
-            except requests.exceptions.HTTPError as e:
-                print(f"    ↳ Torob API error for '{product['name']}': {e}")
+                torob_results = resp.get('results', [])
+            except Exception as e:
+                print(f"    ↳ Torob search error for '{product['name']}': {e}")
                 continue
 
-            # 3) Filter to fuzzy matches
-            filtered = [item for item in torob_res if similar(item.get('name1',''), product['name']) >= 0.6]
+            # 4) Fuzzy filter by name similarity
+            filtered = [it for it in torob_results if similar(it.get('name1',''), product['name']) >= 0.6]
             if not filtered:
-                filtered = torob_res
+                filtered = torob_results
 
-            # 4) Store top 3 competitor prices with real names
+            # 5) Take top 3 matches, resolve store names
             for item in filtered[:3]:
-                seller = item.get('shop_text') or item.get('direct_cta','unknown')
-                # if summary says "در X فروشگاه", fetch detail page
-                if seller.startswith('در') and item.get('prk') and item.get('search_id'):
+                raw_seller = item.get('shop_text','') or item.get('direct_cta','unknown')
+                comp_price = item.get('price', 0)
+
+                # if summary text like "در X فروشگاه", fetch details
+                if raw_seller.startswith('در') and item.get('prk') and item.get('search_id'):
                     try:
                         detail = torob.details(prk=item['prk'], search_id=item['search_id'])
-                        shops = [d.get('shop_text') or d.get('shop_name','') for d in detail.get('items', [])]
-                        seller = ', '.join(shops[:3]) if shops else seller
+                        detail_items = detail.get('items', [])
+                        # extract first 3 real shop names
+                        shops = [d.get('shop_name') or d.get('shop_text') for d in detail_items]
+                        seller = ', '.join(shops[:3]) if shops else raw_seller
                     except Exception as e:
-                        print(f"    [ERROR] could fetch detail for '{seller}': {e}")
-                comp_price = item.get('price', 0)
+                        print(f"    [ERROR] fetching detail for '{raw_seller}': {e}")
+                        seller = raw_seller
+                else:
+                    seller = raw_seller
+
+                # Upsert competitor prices
                 supabase.table('competitor_prices').upsert(
-                    {'product_slug': slug, 'competitor_name': seller, 'competitor_price': comp_price},
+                    {
+                        'product_slug': slug,
+                        'competitor_name': seller,
+                        'competitor_price': comp_price
+                    },
                     on_conflict='product_slug,competitor_name'
                 ).execute()
                 print(f"    ↳ {seller}: {comp_price}")
