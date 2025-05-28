@@ -109,20 +109,34 @@ async def main():
                 comp_price = item.get('price', 0)
                 seller = 'unknown'
 
-                raw_shop = item.get('shop_text','') or item.get('price_prefix','')
+                raw_shop = item.get('shop_text', '') or item.get('price_prefix', '')
                 more_path = item.get('more_info_url') or item.get('web_client_absolute_url')
+
                 if raw_shop.strip().startswith('در') and more_path:
                     more_url = more_path if more_path.startswith('http') else 'https://torob.com' + more_path
                     detail_html = await fetch_page(crawler, more_url)
                     dsoup = BeautifulSoup(detail_html, 'html.parser')
-                    # find seller links on detail page
+
+                    # find seller links or grouped shop names
                     sellers = []
-                    for a_tag in dsoup.select('a[href^="/shops/"]')[:3]:
+                    city = item.get('delivery_city_name', '').strip()
+                    for a_tag in dsoup.select('a[href^="/shops/"]'):
                         text = a_tag.text.strip()
-                        if text and ',' not in text:
+                        if not text:
+                            continue
+                        if ',' in text:
+                            parts = [p.strip() for p in text.split(',') if p.strip()]
+                            for part in parts:
+                                if city and part == city:
+                                    continue
+                                sellers.append(part)
+                                if len(sellers) == 3:
+                                    break
+                        else:
                             sellers.append(text)
                         if len(sellers) == 3:
                             break
+
                     seller = ', '.join(sellers) if sellers else raw_shop
                 else:
                     seller = raw_shop or seller
