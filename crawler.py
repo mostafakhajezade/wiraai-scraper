@@ -110,19 +110,20 @@ async def main():
                 seller = 'unknown'
 
                 raw_shop = item.get('shop_text','') or item.get('price_prefix','')
-                if raw_shop.startswith('در') and item.get('more_info_url'):
-                    # fetch detail page to extract seller names
-                    more_url = item['more_info_url']
-                    full_more = more_url if more_url.startswith('http') else 'https://torob.com' + more_url
-                    detail_html = await fetch_page(crawler, full_more)
+                more_path = item.get('more_info_url') or item.get('web_client_absolute_url')
+                if raw_shop.strip().startswith('در') and more_path:
+                    more_url = more_path if more_path.startswith('http') else 'https://torob.com' + more_path
+                    detail_html = await fetch_page(crawler, more_url)
                     dsoup = BeautifulSoup(detail_html, 'html.parser')
-                    # find seller links (adjust selector based on page structure)
+                    # find seller links on detail page
                     sellers = []
-                    for a_tag in dsoup.select('a.sellerName')[:3]:  # .sellerName is example
+                    for a_tag in dsoup.select('a[href^="/shops/"]')[:3]:
                         text = a_tag.text.strip()
-                        if text and text not in sellers:
+                        if text and ',' not in text:
                             sellers.append(text)
-                    seller = ', '.join(sellers)
+                        if len(sellers) == 3:
+                            break
+                    seller = ', '.join(sellers) if sellers else raw_shop
                 else:
                     seller = raw_shop or seller
 
