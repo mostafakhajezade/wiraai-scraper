@@ -108,22 +108,26 @@ async def main():
             for item in filtered[:3]:
                 comp_price = item.get('price', 0)
                 raw_shop = (item.get('shop_text') or '').strip()
-                more_path = item.get('more_info_url') or item.get('web_client_absolute_url')
+                # prefer HTML link for detail page
+                link_path = item.get('web_client_absolute_url') or item.get('more_info_url')
 
                 seller = raw_shop or 'unknown'
-                # If summary indicates a multi-store link, fetch detail page
-                if raw_shop.startswith('در') and more_path:
-                    more_url = more_path if more_path.startswith('http') else 'https://torob.com' + more_path
-                    detail_html = await fetch_page(crawler, more_url)
+
+                # If this is a multi-store entry, follow the Torob page and extract names
+                if 'فروشگاه' in raw_shop and link_path:
+                    detail_url = link_path if link_path.startswith('http') else 'https://torob.com' + link_path
+                    print(f"    [DEBUG] following multi-store link: {detail_url}")
+                    detail_html = await fetch_page(crawler, detail_url)
                     if detail_html:
                         dsoup = BeautifulSoup(detail_html, 'html.parser')
                         shops = []
+                        # Torob shop links usually contain /shop/
                         for a_tag in dsoup.select('a[href*="/shop/"]'):
-                            name = a_tag.get_text(strip=True)
-                            # remove any city-only fragments
-                            parts = [p.strip() for p in name.split(',') if p.strip()]
-                            if parts:
-                                shops.append(parts[0])
+                            name = a_tag.get_text(separator=' ', strip=True)
+                            # drop any city info after comma
+                            clean = name.split(',')[0].strip()
+                            if clean and clean not in shops:
+                                shops.append(clean)
                             if len(shops) == 3:
                                 break
                         if shops:
