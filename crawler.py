@@ -119,7 +119,7 @@ async def main():
 
                     # find seller links or grouped shop names
                     sellers = []
-                    city = item.get('delivery_city_name', '').strip()
+                    city = (item.get('delivery_city_name') or '').strip()
                     for a_tag in dsoup.select('a[href^="/shops/"]'):
                         text = a_tag.text.strip()
                         if not text:
