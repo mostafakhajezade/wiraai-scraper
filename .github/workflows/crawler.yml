@@ -21,10 +21,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          - name: Install Playwright browsers
-            run: |
-              playwright install --with-deps
 
+      - name: Install Playwright browsers
+        run: |
+          playwright install --with-deps
 
       - name: Run crawler
         env:
