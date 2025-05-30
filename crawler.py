@@ -6,6 +6,8 @@ from crawl4ai import AsyncWebCrawler
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
+from openai import OpenAI
+from openai.embeddings_utils import get_embedding, cosine_similarity
 
 # --- Supabase setup (Service Role bypasses RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -14,15 +16,27 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env var")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+# --- OpenAI setup for embeddings ---
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("Missing OPENAI_API_KEY env var")
+oai = OpenAI(api_key=OPENAI_API_KEY)
+
 # --- Helper: convert Persian digits to English ---
 def persian_to_english_numbers(text: str) -> str:
     persian = "۰۱۲۳۴۵۶۷۸۹"
     english = "0123456789"
     return text.translate(str.maketrans(persian, english))
 
-# --- Helper: fuzzy similarity ---
+# --- Helper: fuzzy similarity (fallback) ---
 def similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+# --- Helper: semantic similarity via embeddings ---
+def semantic_score(a: str, b: str) -> float:
+    emb_a = get_embedding(a, model="text-embedding-ada-002", openai_client=oai)
+    emb_b = get_embedding(b, model="text-embedding-ada-002", openai_client=oai)
+    return cosine_similarity(emb_a, emb_b)
 
 # --- Fetch via Crawl4AI ---
 async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
@@ -84,14 +98,22 @@ async def main():
                 continue
 
             product = extract_product_data(html)
-            slug = prod_url.split('/product/', 1)[-1]
             product['url'] = prod_url
 
-            # Upsert product record
-            supabase.table('products').upsert(product, on_conflict='url').execute()
-            print(f"  • Stored product: {product['name']}")
+            # 3) Upsert product record and retrieve its UUID
+            supabase.table('products') \
+                .upsert(product, on_conflict='url') \
+                .execute()
+            # Fetch the inserted/updated product ID
+            res = supabase.table('products') \
+                .select('id') \
+                .eq('url', product['url']) \
+                .single() \
+                .execute()
+            product_id = res.data['id']
+            print(f"  • Stored product: {product['name']} (id={product_id})")
 
-            # 3) Query Torob for competitor prices
+            # 4) Query Torob for competitor prices
             try:
                 resp = torob.search(q=product['name'], page=0)
                 torob_results = resp.get('results', [])
@@ -99,46 +121,42 @@ async def main():
                 print(f"    ↳ Torob search error for '{product['name']}': {e}")
                 continue
 
-            # 4) Fuzzy filter by name similarity
-            filtered = [it for it in torob_results if similar(it.get('name1',''), product['name']) >= 0.6]
-            if not filtered:
-                filtered = torob_results
+            # 5) Enhanced filtering by combining fuzzy and semantic similarity
+            scored = []
+            for it in torob_results:
+                name1 = it.get('name1','')
+                f_score = similar(name1, product['name'])
+                s_score = semantic_score(name1, product['name'])
+                score = max(f_score, s_score)
+                scored.append((score, it))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_matches = [it for _, it in scored[:5]]
 
-            # 5) Take top 3 matches, resolve store names
-            for item in filtered[:3]:
+            # 6) Take top 3 matches, resolve store names
+            for item in top_matches[:3]:
                 comp_price = item.get('price', 0)
                 raw_shop = (item.get('shop_text') or '').strip()
                 link_path = item.get('web_client_absolute_url') or item.get('more_info_url')
-
                 seller = raw_shop or 'unknown'
 
                 # Handle multi-store entries
                 if 'فروشگاه' in raw_shop and link_path:
                     detail_url = link_path if link_path.startswith('http') else 'https://torob.com' + link_path
-                    print(f"    [DEBUG] following multi-store link: {detail_url}")
                     detail_html = await fetch_page(crawler, detail_url)
                     if detail_html:
                         dsoup = BeautifulSoup(detail_html, 'html.parser')
-                        shops = []
-                        # Select only actual shop-name anchors
-                        for a_tag in dsoup.select('a.shop-name'):
-                            name_text = a_tag.get_text(strip=True)
-                            if name_text and name_text not in shops:
-                                shops.append(name_text)
-                            if len(shops) == 3:
-                                break
+                        shops = [a.get_text(strip=True).split(',')[0] for a in dsoup.select('a.shop-name')][:3]
                         if shops:
                             seller = ', '.join(shops)
 
-                # Upsert competitor prices
-                supabase.table('competitor_prices').upsert(
-                    {
-                        'product_slug': slug,
+                # 7) Upsert competitor prices with product_id foreign key
+                supabase.table('competitor_prices') \
+                    .upsert({
+                        'product_id': product_id,
                         'competitor_name': seller,
                         'competitor_price': comp_price
-                    },
-                    on_conflict='product_slug,competitor_name'
-                ).execute()
+                    }, on_conflict='product_id,competitor_name') \
+                    .execute()
                 print(f"    ↳ {seller}: {comp_price}")
 
 if __name__ == '__main__':
