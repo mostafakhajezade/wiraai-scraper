@@ -22,8 +22,8 @@ import requests
 #   SUPABASE_URL = "https://abc123xyz.supabase.co"
 #   SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…"
 #
-SUPABASE_URL = "https://djjmhfffusochizzkhqh.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRqam1oZmZmdXNvY2hpenpraHFoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODE4MjAwMiwiZXhwIjoyMDYzNzU4MDAyfQ._YkNr4oO5jQ2y-X4ggJjwcTZKphxyo8p4TkuPZCxNCA"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY (hard-coded)")
@@ -40,10 +40,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # 3) Copy that token and paste it below. For example:
 #       HF_API_TOKEN = "hf_xxxYOURTOKENxxx"
 #
-HF_API_TOKEN = "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"
-
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")
 if not HF_API_TOKEN:
-    raise RuntimeError("Missing HF_API_TOKEN (hard-coded)")
+    raise RuntimeError("Missing HF_API_TOKEN (set it in .env or your environment)")
+
 
 # We’ll call the “all-MiniLM-L6-v2” sentence-transformers model endpoint for embeddings.
 HF_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
