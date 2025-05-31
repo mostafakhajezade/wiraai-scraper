@@ -2,18 +2,17 @@ name: 🕷️ Run Wiraa Crawler
 
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour, for example
+    - cron: '0 * * * *'   # every hour
   workflow_dispatch:
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -22,22 +21,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # If you need Playwright, install browsers too:
+          # If you’re using python-dotenv, also install it:
+          pip install python-dotenv
+          # Install Playwright browsers if you need them:
           playwright install --with-deps
 
-      - name: Debug environment (should be masked, not empty)
-        run: |
-          echo "⧗ SUPABASE_URL=[$SUPABASE_URL]"
-          echo "⧗ SUPABASE_SERVICE_ROLE_KEY=[$SUPABASE_SERVICE_ROLE_KEY]"
-          echo "⧗ OPENROUTER_API_URL=[$OPENROUTER_API_URL]"
-          echo "⧗ OPENROUTER_API_KEY=[$OPENROUTER_API_KEY]"
-
       - name: Run crawler
-        # ← Here we inject the four secrets into environment
         env:
-          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
+          HF_API_TOKEN: ${{ secrets.HF_API_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          OPENROUTER_API_URL:  ${{ secrets.OPENROUTER_API_URL }}
-          OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python crawler.py
