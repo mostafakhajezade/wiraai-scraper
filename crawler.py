@@ -18,7 +18,7 @@ SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdX
 
 # 2) Your OpenRouter base URL and API key (for “OpenAI” compatibility):
 #    - example base URL: "https://api.openrouter.ai/v1"
-OPENAI_API_BASE = "https://api.openrouter.ai/v1"
+OPENAI_API_BASE = "https://openrouter.ai/api/v1"
 OPENAI_API_KEY  = "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"
 # ────────────────────────────────────────────────────────────────────────────────
 
