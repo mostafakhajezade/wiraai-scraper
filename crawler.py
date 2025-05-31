@@ -11,16 +11,16 @@ from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
 
-import openai
+import requests
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) ─── SUPABASE (hard-coded) ─────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # Replace these two lines with your actual Supabase project URL and service-role key.
-# Be sure **NOT** to include the angle brackets. For example:
-# SUPABASE_URL = "https://abc123xyz.supabase.co"
-# SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…"
+# Example:
+#   SUPABASE_URL = "https://abc123xyz.supabase.co"
+#   SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…"
 #
 SUPABASE_URL = "https://djjmhfffusochizzkhqh.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRqam1oZmZmdXNvY2hpenpraHFoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODE4MjAwMiwiZXhwIjoyMDYzNzU4MDAyfQ._YkNr4oO5jQ2y-X4ggJjwcTZKphxyo8p4TkuPZCxNCA"
@@ -32,27 +32,28 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2) ─── OPENROUTER SETTINGS ───────────────────────────────────────────────────
+# 2) ─── HUGGING FACE INFERENCE API SETTINGS ───────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 #
-# Sign up at https://openrouter.ai, create an API key, and paste it here. For example:
-# OPENROUTER_API_KEY = "or-sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# 1) Sign up for a free account at https://huggingface.co (if you don’t already have one).
+# 2) Go to your Account Settings → Access Tokens → New Token → name it “crawler-embeddings” (scope = “read”).
+# 3) Copy that token and paste it below. For example:
+#       HF_API_TOKEN = "hf_xxxYOURTOKENxxx"
 #
-OPENROUTER_API_KEY = "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"
+HF_API_TOKEN = "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"
 
-if not OPENROUTER_API_KEY:
-    raise RuntimeError("Missing OPENROUTER_API_KEY (hard-coded)")
+if not HF_API_TOKEN:
+    raise RuntimeError("Missing HF_API_TOKEN (hard-coded)")
 
-# OpenRouter’s “OpenAI-compatible” base URL:
-OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+# We’ll call the “all-MiniLM-L6-v2” sentence-transformers model endpoint for embeddings.
+HF_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Tell the `openai` library to send requests to OpenRouter instead of api.openai.com:
-openai.api_key = OPENROUTER_API_KEY
-openai.api_base = OPENROUTER_API_BASE
+# Hugging Face Inference API URL:
+HF_INFERENCE_URL = f"https://api-inference.huggingface.co/embeddings/{HF_EMBEDDING_MODEL}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3) ─── HELPERS: Digit conversion & similarity functions ─────────────────────
+# 3) ─── HELPER: Digit conversion & similarity functions ────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 
 def persian_to_english_numbers(text: str) -> str:
@@ -71,17 +72,24 @@ def similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
-def get_embedding(text: str, model: str = "mistralai/devstral-small:free") -> list[float]:
+def get_hf_embedding(text: str) -> list[float]:
     """
-    Fetch a single embedding vector from OpenRouter (via openai.embeddings.create).
-    Raises if the API call fails.
+    Call the Hugging Face embeddings endpoint and return a single vector.
+    Raises an exception if something goes wrong (e.g. rate‐limit, invalid token).
     """
-    response = openai.embeddings.create(
-        model=model,
-        input=text
-    )
-    # response["data"] is a list, and we take the first element’s "embedding" field
-    return response["data"][0]["embedding"]
+    headers = {
+        "Authorization": f"Bearer {HF_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    data = {"inputs": text}
+    resp = requests.post(HF_INFERENCE_URL, headers=headers, json=data, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Hugging Face embedding API returned {resp.status_code}: {resp.text}")
+    # The response is a JSON list of floats
+    embedding_vector = resp.json()
+    if not isinstance(embedding_vector, list):
+        raise RuntimeError(f"Unexpected HF embedding response format: {resp.text}")
+    return embedding_vector
 
 
 def cosine_similarity(a_emb: list[float], b_emb: list[float]) -> float:
@@ -96,25 +104,24 @@ def cosine_similarity(a_emb: list[float], b_emb: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def semantic_score(a: str, b: str, model: str = "mistralai/devstral-small:free") -> float:
+def semantic_score(a: str, b: str) -> float:
     """
-    Get embeddings for `a` and `b` and return their cosine similarity.
-    If anything goes wrong (e.g. rate limit, model not found), this function
-    will raise. The caller should catch and fall back to fuzzy.
+    Get embeddings for `a` and `b` via Hugging Face’s Inference API
+    and return their cosine similarity. Raises on error.
     """
-    emb_a = get_embedding(a, model=model)
-    emb_b = get_embedding(b, model=model)
+    emb_a = get_hf_embedding(a)
+    emb_b = get_hf_embedding(b)
     return cosine_similarity(emb_a, emb_b)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4) ─── Crawl4AI and HTML link extractor ───────────────────────────────────────
+# 4) ─── Crawl4AI fetch + HTML link extractor ──────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
     """
-    Uses Crawl4AI to fetch a URL asynchronously. Returns the raw HTML string if successful,
-    or an empty string on failure.
+    Uses Crawl4AI to fetch a URL asynchronously. Returns the HTML string if successful,
+    or an empty string otherwise.
     """
     res = await crawler.arun(url)
     if res.success:
@@ -126,8 +133,7 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 def extract_links(html: str, selector: str, base_url: str) -> list[str]:
     """
     Given a chunk of HTML, return a deduplicated list of all `href` values found
-    by `soup.select(selector)`, turning them into absolute URLs relative to base_url
-    if needed.
+    by `soup.select(selector)`, turned into absolute URLs relative to base_url.
     """
     soup = BeautifulSoup(html, "html.parser")
     links: list[str] = []
@@ -142,14 +148,14 @@ def extract_links(html: str, selector: str, base_url: str) -> list[str]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5) ─── Wiraa.ir PRODUCT DATA EXTRACTOR ───────────────────────────────────────
+# 5) ─── Wiraa.ir product‐page parser ──────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 
 def extract_product_data(html: str) -> dict:
     """
     Parses a Wiraa.ir product page’s HTML and extracts:
       - name: string inside <h1 data-product="title">…</h1>
-      - price: integer price (in Tomans), stripping any non-digits & Persian digits
+      - price: integer (Tomans), stripping non-digits & Persian digits
     Returns {"name": str, "price": int}.
     """
     soup = BeautifulSoup(html, "html.parser")
@@ -159,7 +165,6 @@ def extract_product_data(html: str) -> dict:
 
     price_el = soup.select_one("div.styles__price___1uiIp.js-price")
     raw_price = price_el.text.strip() if price_el else "0"
-    # Convert Persian digits → English, remove non-digits, then parse
     digits_only = re.sub(r"[^\d]", "", persian_to_english_numbers(raw_price))
     price = int(digits_only) if digits_only else 0
 
@@ -175,7 +180,7 @@ async def main():
     crawler = AsyncWebCrawler()
     torob = Torob()
 
-    # 1) Fetch homepage, grab category URLs
+    # 1) Fetch homepage and get category URLs
     home_html = await fetch_page(crawler, base_url)
     if not home_html:
         return
@@ -192,7 +197,7 @@ async def main():
         products = extract_links(cat_html, "a[href^='/product/']", base_url)
         print(f" → {len(products)} products found")
 
-        # 3) Visit each product page
+        # 3) Visit each product URL
         for prod_url in products:
             product_html = await fetch_page(crawler, prod_url)
             if not product_html:
@@ -207,7 +212,7 @@ async def main():
                 .upsert(product, on_conflict="url") \
                 .execute()
 
-            # 3c) Fetch the newly inserted/updated product ID
+            # 3c) Fetch the inserted/updated product ID
             res = supabase.table("products") \
                 .select("id") \
                 .eq("url", product["url"]) \
@@ -216,7 +221,7 @@ async def main():
             product_id = res.data["id"]
             print(f"  • Stored product: {product['name']}  (id={product_id})")
 
-            # 4) Query Torob for competitors
+            # 4) Query Torob for competitor listings
             try:
                 torob_resp = torob.search(q=product["name"], page=0)
                 torob_results = torob_resp.get("results", [])
@@ -232,26 +237,30 @@ async def main():
                 try:
                     s_score = semantic_score(name1, product["name"])
                 except Exception as sem_e:
-                    # If embedding fails, warn and fallback to fuzzy only
-                    print(f"      [WARN] Semantic error: {sem_e}, falling back to fuzzy")
+                    # If the HF embedding call fails, fall back to fuzzy only
+                    print(f"      [WARN] Semantic error: {sem_e}.  Falling back to fuzzy only.")
                     s_score = 0.0
                 combined = max(f_score, s_score)
                 scored.append((combined, item))
 
-            # 5b) Sort by combined similarity (descending) and pick top 5
+            # 5b) Sort descending & take top 5 candidates
             scored.sort(key=lambda x: x[0], reverse=True)
             top_five = [it for _, it in scored[:5]]
 
-            # 6) From the top five, take the first three competitor entries
+            # 6) From top 5, choose up to 3 to upsert into competitor_prices
             for candidate in top_five[:3]:
                 comp_price = candidate.get("price", 0)
                 raw_shop = (candidate.get("shop_text") or "").strip()
                 link_path = candidate.get("web_client_absolute_url") or candidate.get("more_info_url")
                 seller = raw_shop if raw_shop else "unknown"
 
-                # 6a) If this listing says “در X فروشگاه” (multi-store), follow link_path
+                # 6a) If listing says “در X فروشگاه” (multi‐shop), follow detail link
                 if "فروشگاه" in raw_shop and link_path:
-                    detail_url = link_path if link_path.startswith("http") else "https://torob.com" + link_path
+                    detail_url = (
+                        link_path
+                        if link_path.startswith("http")
+                        else "https://torob.com" + link_path
+                    )
                     detail_html = await fetch_page(crawler, detail_url)
                     if detail_html:
                         dsoup = BeautifulSoup(detail_html, "html.parser")
@@ -265,7 +274,7 @@ async def main():
                         if shops_list:
                             seller = ", ".join(shops_list)
 
-                # 7) Upsert competitor_prices with (product_id, competitor_name) → competitor_price
+                # 7) Upsert competitor_prices (needs UNIQUE(product_id, competitor_name))
                 supabase.table("competitor_prices") \
                     .upsert({
                         "product_id": product_id,
