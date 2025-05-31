@@ -8,6 +8,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -21,16 +22,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright browsers
-        run: |
           playwright install --with-deps
+
+      - name: Debug: print environment variables
+        run: |
+          echo "---- SUPABASE_URL is: ($SUPABASE_URL) ----"
+          echo "---- SUPABASE_SERVICE_ROLE_KEY is: ($SUPABASE_SERVICE_ROLE_KEY) ----"
+          echo "---- OPENROUTER_API_URL is: ($OPENROUTER_API_URL) ----"
+          echo "---- OPENROUTER_API_KEY is: ($OPENROUTER_API_KEY) ----"
 
       - name: Run crawler
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_URL: ${{ secrets.OPENROUTER_API_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python crawler.py
