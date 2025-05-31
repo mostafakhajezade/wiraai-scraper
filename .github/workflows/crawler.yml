@@ -2,7 +2,7 @@ name: 🕷️ Run Wiraa Crawler
 
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -10,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -24,12 +23,12 @@ jobs:
           pip install -r requirements.txt
           playwright install --with-deps
 
-      - name: Debug: print environment variables
+      - name: Debug environment
         run: |
-          echo "---- SUPABASE_URL is: ($SUPABASE_URL) ----"
-          echo "---- SUPABASE_SERVICE_ROLE_KEY is: ($SUPABASE_SERVICE_ROLE_KEY) ----"
-          echo "---- OPENROUTER_API_URL is: ($OPENROUTER_API_URL) ----"
-          echo "---- OPENROUTER_API_KEY is: ($OPENROUTER_API_KEY) ----"
+          echo "SUPABASE_URL=[$SUPABASE_URL]"
+          echo "SUPABASE_SERVICE_ROLE_KEY=[$SUPABASE_SERVICE_ROLE_KEY]"
+          echo "OPENROUTER_API_URL=[$OPENROUTER_API_URL]"
+          echo "OPENROUTER_API_KEY=[$OPENROUTER_API_KEY]"
 
       - name: Run crawler
         env:
