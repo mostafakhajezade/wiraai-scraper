@@ -2,12 +2,12 @@ import os
 import re
 import asyncio
 from difflib import SequenceMatcher
-import numpy as np
 from crawl4ai import AsyncWebCrawler
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
 from openai import OpenAI
+from openai.embeddings_utils import get_embedding, cosine_similarity
 
 # --- Supabase setup (Service Role bypasses RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -16,11 +16,14 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env var")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# --- OpenAI setup for embeddings ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise RuntimeError("Missing OPENAI_API_KEY env var")
-oai = OpenAI(api_key=OPENAI_API_KEY)
+# --- OpenRouter setup for embeddings (using OpenAI SDK) ---
+OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+if not OPENROUTER_API_URL or not OPENROUTER_API_KEY:
+    raise RuntimeError("Missing OPENROUTER_API_URL or OPENROUTER_API_KEY env var")
+
+# Instantiate OpenAI client, pointing at your OpenRouter endpoint
+oai = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_API_URL)
 
 # --- Helper: convert Persian digits to English ---
 def persian_to_english_numbers(text: str) -> str:
@@ -32,24 +35,10 @@ def persian_to_english_numbers(text: str) -> str:
 def similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
-# --- Embedding helpers ---
-def get_embedding(text: str) -> list[float]:
-    resp = oai.embeddings.create(
-        model="text-embedding-ada-002",
-        input=text,
-    )
-    return resp.data[0].embedding
-
-
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    a_arr = np.array(a, dtype=np.float32)
-    b_arr = np.array(b, dtype=np.float32)
-    return float(a_arr.dot(b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr)))
-
 # --- Helper: semantic similarity via embeddings ---
 def semantic_score(a: str, b: str) -> float:
-    emb_a = get_embedding(a)
-    emb_b = get_embedding(b)
+    emb_a = get_embedding(a, model="text-embedding-ada-002", openai_client=oai)
+    emb_b = get_embedding(b, model="text-embedding-ada-002", openai_client=oai)
     return cosine_similarity(emb_a, emb_b)
 
 # --- Fetch via Crawl4AI ---
@@ -63,11 +52,11 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 # --- Extract links matching a CSS selector ---
 def extract_links(html: str, selector: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    links = []
+    links: list[str] = []
     for a in soup.select(selector):
-        href = a.get('href')
+        href = a.get("href")
         if href:
-            full = href if href.startswith('http') else base_url.rstrip('/') + href
+            full = href if href.startswith("http") else base_url.rstrip("/") + href
             if full not in links:
                 links.append(full)
     return links
@@ -94,71 +83,92 @@ async def main():
     if not home_html:
         return
     categories = extract_links(home_html, "a[href^='/category/']", base_url)
+    print(f"[INFO] Found {len(categories)} categories")
 
-    # 2) Iterate categories
+    # 2) Iterate each category
     for cat_url in categories:
+        print(f"\n[CATEGORY] {cat_url}")
         cat_html = await fetch_page(crawler, cat_url)
         if not cat_html:
             continue
+
         products = extract_links(cat_html, "a[href^='/product/']", base_url)
-        print(f"[CATEGORY] {cat_url} → {len(products)} products")
+        print(f" → {len(products)} products found")
 
         for prod_url in products:
             html = await fetch_page(crawler, prod_url)
             if not html:
                 continue
 
-            # 3) Upsert product
             product = extract_product_data(html)
-            product['url'] = prod_url
-            supabase.table('products') \
-                .upsert(product, on_conflict='url') \
+            product["url"] = prod_url
+
+            # 3) Upsert product record and retrieve its UUID
+            supabase.table("products").upsert(product, on_conflict="url").execute()
+            res = (
+                supabase.table("products")
+                .select("id")
+                .eq("url", product["url"])
+                .single()
                 .execute()
-            # fetch its auto-generated ID
-            res = supabase.table('products') \
-                .select('id') \
-                .eq('url', prod_url) \
-                .single() \
-                .execute()
-            product_id = res.data['id']
+            )
+            product_id = res.data["id"]
             print(f"  • Stored product: {product['name']} (id={product_id})")
 
-            # 4) Query Torob
+            # 4) Query Torob for competitor prices
             try:
-                resp = torob.search(q=product['name'], page=0)
-                torob_results = resp.get('results', [])
+                resp = torob.search(q=product["name"], page=0)
+                torob_results = resp.get("results", [])
             except Exception as e:
-                print(f"    ↳ Torob error: {e}")
+                print(f"    ↳ Torob search error for '{product['name']}': {e}")
                 continue
 
-            # 5) Score matches
-            scored = []
+            # 5) Enhanced filtering by combining fuzzy and semantic similarity
+            scored: list[tuple[float, dict]] = []
             for it in torob_results:
-                name1 = it.get('name1','')
-                score = max(similar(name1, product['name']), semantic_score(name1, product['name']))
+                name1 = it.get("name1", "")
+                f_score = similar(name1, product["name"])
+                s_score = semantic_score(name1, product["name"])
+                score = max(f_score, s_score)
                 scored.append((score, it))
             scored.sort(key=lambda x: x[0], reverse=True)
-            top = [it for _, it in scored[:3]]
+            top_matches = [it for _, it in scored[:5]]
 
-            # 6) Upsert competitor prices
-            for item in top:
-                price = item.get('price', 0)
-                shop = (item.get('shop_text') or '').strip()
-                if 'فروشگاه' in shop and item.get('web_client_absolute_url'):
-                    detail_url = item['web_client_absolute_url']
+            # 6) Take top 3 matches, resolve store names
+            for item in top_matches[:3]:
+                comp_price = item.get("price", 0)
+                raw_shop = (item.get("shop_text") or "").strip()
+                link_path = item.get("web_client_absolute_url") or item.get("more_info_url")
+                seller = raw_shop or "unknown"
+
+                # Handle multi-store entries
+                if "فروشگاه" in raw_shop and link_path:
+                    detail_url = (
+                        link_path if link_path.startswith("http") else "https://torob.com" + link_path
+                    )
                     detail_html = await fetch_page(crawler, detail_url)
                     if detail_html:
-                        dsoup = BeautifulSoup(detail_html, 'html.parser')
-                        shops = [a.get_text(strip=True).split(',')[0] for a in dsoup.select('a.shop-name')][:3]
-                        shop = ', '.join(shops)
-                supabase.table('competitor_prices') \
-                    .upsert({
-                        'product_id': product_id,
-                        'competitor_name': shop or 'unknown',
-                        'competitor_price': price
-                    }, on_conflict='product_id,competitor_name') \
-                    .execute()
-                print(f"    ↳ {shop}: {price}")
+                        dsoup = BeautifulSoup(detail_html, "html.parser")
+                        shops = []
+                        for a_tag in dsoup.select("a.shop-name"):
+                            name_text = a_tag.get_text(strip=True).split(",")[0].strip()
+                            if name_text and name_text not in shops:
+                                shops.append(name_text)
+                            if len(shops) == 3:
+                                break
+                        if shops:
+                            seller = ", ".join(shops)
 
-if __name__ == '__main__':
+                # 7) Upsert competitor prices with product_id foreign key
+                supabase.table("competitor_prices").upsert(
+                    {
+                        "product_id": product_id,
+                        "competitor_name": seller,
+                        "competitor_price": comp_price,
+                    },
+                    on_conflict="product_id,competitor_name",
+                ).execute()
+                print(f"    ↳ {seller}: {comp_price}")
+
+if __name__ == "__main__":
     asyncio.run(main())
