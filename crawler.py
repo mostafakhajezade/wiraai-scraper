@@ -9,32 +9,35 @@ from supabase import create_client, Client
 from torob_integration.api import Torob
 from openai import OpenAI
 
-# ─── Supabase Setup ───
+# ─── SUPABASE SETUP ───
 SUPABASE_URL             = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env var")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# ─── OpenRouter Setup ───
-OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-if not OPENROUTER_API_URL or not OPENROUTER_API_KEY:
-    raise RuntimeError("Missing OPENROUTER_API_URL or OPENROUTER_API_KEY env var")
+# ─── OPENROUTER (via OpenAI SDK) SETUP ───
+# Before running, ensure in your shell/CI you have:
+#   export OPENAI_API_BASE="https://api.openrouter.ai/v1"
+#   export OPENAI_API_KEY="<your-openrouter-api-key>"
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    raise RuntimeError("Missing OPENAI_API_KEY env var")
 
-# Initialize an OpenAI client that points at OpenRouter
-oai = OpenAI(api_key=OPENROUTER_API_KEY, api_base=OPENROUTER_API_URL)
+# Do NOT pass api_base here—OpenAI SDK will read OPENAI_API_BASE from env.
+oai = OpenAI(api_key=openai_api_key)
 
-# ─── Helpers ───
+# ─── HELPERS ───
 
 def persian_to_english_numbers(text: str) -> str:
-    """Convert Persian digits in `text` to ASCII digits."""
+    """Convert Persian numerals to ASCII digits."""
     persian = "۰۱۲۳۴۵۶۷۸۹"
     english = "0123456789"
     return text.translate(str.maketrans(persian, english))
 
 def similar(a: str, b: str) -> float:
-    """Fallback fuzzy similarity via difflib.SequenceMatcher."""
+    """Simple fuzzy similarity (SequenceMatcher)."""
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
@@ -52,29 +55,28 @@ def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
 
 def get_embedding_via_openrouter(text: str, model_name: str) -> list[float]:
     """
-    Query OpenRouter’s embeddings endpoint using the specified model_name
-    (e.g. "mistralai/devstral-small:free"). Returns a single embedding vector.
+    Request a single embedding from the OpenRouter endpoint.
+    Model examples: "mistralai/devstral-small:free"
     """
-    # The OpenAI‐py client exposes an `embeddings.create(...)` method
     resp = oai.embeddings.create(
         model=model_name,
         input=[text]
     )
-    # The response’s `.data` is a list of { index: int, embedding: [...] }. We asked for one input, so index=0.
+    # The returned JSON has a `data` list; we extract index 0’s embedding.
     return resp["data"][0]["embedding"]
 
 def semantic_score(a: str, b: str) -> float:
     """
-    Compute semantic similarity between strings `a` and `b` by:
-      1) retrieving each embedding from OpenRouter (“mistralai/devstral-small:free”)
-      2) computing cosine similarity of the two embedding vectors.
+    Compute semantic similarity between `a` and `b` by:
+      1) calling get_embedding_via_openrouter( … )
+      2) measuring their cosine_similarity
     """
     emb_a = get_embedding_via_openrouter(a, model_name="mistralai/devstral-small:free")
     emb_b = get_embedding_via_openrouter(b, model_name="mistralai/devstral-small:free")
     return cosine_similarity(emb_a, emb_b)
 
 async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
-    """Use Crawl4AI to fetch a page’s HTML. Returns empty string on failure."""
+    """Use Crawl4AI to fetch HTML. Return empty string on failure."""
     res = await crawler.arun(url)
     if res.success:
         return res.html
@@ -83,8 +85,9 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 
 def extract_links(html: str, selector: str, base_url: str) -> list[str]:
     """
-    Given some HTML and a CSS selector (e.g. "a[href^='/category/']"),
-    return a deduped list of absolute URLs.
+    From `html`, select all `<a>` tags matching `selector` (CSS),
+    turn their `href` into absolute URLs (prefixed by `base_url` if needed),
+    and dedupe.
     """
     soup = BeautifulSoup(html, "html.parser")
     links: list[str] = []
@@ -99,33 +102,34 @@ def extract_links(html: str, selector: str, base_url: str) -> list[str]:
 
 def extract_product_data(html: str) -> dict:
     """
-    Parse a Wiraa product page’s HTML and return a dict:
-      { "name": <product name>, "price": <integer price in Toman> }
+    Given a Wiraa product page’s HTML, return:
+      {"name": <string>, "price": <int>}
     """
     soup = BeautifulSoup(html, "html.parser")
     title_el = soup.select_one('h1[data-product="title"]')
     name = title_el.text.strip() if title_el else "No Name"
+
     price_el = soup.select_one("div.styles__price___1uiIp.js-price")
     raw_price = price_el.text.strip() if price_el else "0"
     digits_only = re.sub(r"[^\d]", "", persian_to_english_numbers(raw_price))
     price_int = int(digits_only) if digits_only else 0
+
     return {"name": name, "price": price_int}
 
-# ─── Main crawler logic ───
+# ─── MAIN CRAWLER ───
 
 async def main():
     base_url = "https://wiraa.ir"
     crawler = AsyncWebCrawler()
-    torob = Torob()
+    torob   = Torob()
 
-    # Step 1: Fetch homepage, find category links
+    # 1) Fetch homepage and find category links
     home_html = await fetch_page(crawler, base_url)
     if not home_html:
         return
     categories = extract_links(home_html, "a[href^='/category/']", base_url)
     print(f"[INFO] Found {len(categories)} categories on the homepage.")
 
-    # Step 2: For each category page, scrape product links
     for cat_url in categories:
         print(f"\n[CATEGORY] {cat_url}")
         cat_html = await fetch_page(crawler, cat_url)
@@ -136,35 +140,32 @@ async def main():
         print(f" → Found {len(product_links)} products in this category.")
 
         for prod_url in product_links:
-            # Step 3: Fetch the product page and extract name + price
             prod_html = await fetch_page(crawler, prod_url)
             if not prod_html:
                 continue
 
             product = extract_product_data(prod_html)
-            product["url"] = prod_url  # use URL as the unique key
+            product["url"] = prod_url  # use URL as unique key
 
-            # Upsert into `products` table (on conflict, uses `url` to decide)
+            # 2) Upsert into `products` table
             supabase.table("products").upsert(product, on_conflict="url").execute()
 
-            # Step 4: Retrieve the newly‐inserted (or updated) product’s ID
+            # 3) Retrieve the product’s integer ID
             row = (
                 supabase.table("products")
-                .select("id")
-                .eq("url", product["url"])
-                .single()
-                .execute()
+                         .select("id")
+                         .eq("url", product["url"])
+                         .single()
+                         .execute()
             )
-
-            # In supabase‐py v2, `.single().execute()` yields a SingleAPIResponse with `.data`
             if not row.data:
                 print(f"    [WARN] Could not retrieve ID for {product['url']}")
                 continue
 
             product_id = row.data["id"]
-            print(f"  • Stored product: {product['name']}  (id={product_id})")
+            print(f"  • Stored product: {product['name']} (id={product_id})")
 
-            # Step 5: Query Torob for competitor listings
+            # 4) Query Torob for potential competitor listings
             try:
                 resp = torob.search(q=product["name"], page=0)
                 torob_results = resp.get("results", [])
@@ -172,7 +173,7 @@ async def main():
                 print(f"    ↳ Torob search error for '{product['name']}': {e}")
                 continue
 
-            # Step 6: Score each Torob result by either fuzzy‐score or semantic‐score
+            # 5) Score each Torob result by fuzzy OR semantic similarity
             scored: list[tuple[float, dict]] = []
             for it in torob_results:
                 name1 = it.get("name1", "")
@@ -182,17 +183,16 @@ async def main():
                 scored.append((combined, it))
             scored.sort(key=lambda x: x[0], reverse=True)
 
-            # Keep the top 5 matches by combined score
             top_matches = [item for _, item in scored[:5]]
 
-            # Step 7: From those top matches, upsert up to 3 competitor_price rows
+            # 6) Upsert top‐3 competitor_price rows
             for item in top_matches[:3]:
                 comp_price = item.get("price", 0)
                 raw_shop   = (item.get("shop_text") or "").strip()
                 link_path  = item.get("web_client_absolute_url") or item.get("more_info_url")
                 seller     = raw_shop or "unknown"
 
-                # If the Torob listing says “در X فروشگاه” (multi‐store), follow that detail page
+                # If “در X فروشگاه” appears, follow detail page to get exact shop names
                 if "فروشگاه" in raw_shop and link_path:
                     detail_url = (
                         link_path if link_path.startswith("http")
@@ -211,7 +211,7 @@ async def main():
                         if shops:
                             seller = ", ".join(shops)
 
-                # Step 8: Upsert into competitor_prices (use product_id as FK)
+                # 7) Upsert competitor_prices with the foreign key product_id
                 supabase.table("competitor_prices").upsert(
                     {
                         "product_id":       product_id,
