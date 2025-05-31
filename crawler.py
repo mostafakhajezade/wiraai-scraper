@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import asyncio
 from difflib import SequenceMatcher
 from crawl4ai import AsyncWebCrawler
@@ -7,7 +8,6 @@ from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
 from openai import OpenAI
-from openai.embeddings_utils import get_embedding, cosine_similarity
 
 # --- Supabase setup (Service Role bypasses RLS) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -35,10 +35,21 @@ def persian_to_english_numbers(text: str) -> str:
 def similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
+# --- Helper: compute cosine similarity between two vectors ---
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
 # --- Helper: semantic similarity via embeddings ---
 def semantic_score(a: str, b: str) -> float:
-    emb_a = get_embedding(a, model="text-embedding-ada-002", openai_client=oai)
-    emb_b = get_embedding(b, model="text-embedding-ada-002", openai_client=oai)
+    # Obtain embedding for text A
+    resp_a = oai.embeddings.create(model="text-embedding-ada-002", input=a)
+    emb_a = resp_a.data[0].embedding
+    # Obtain embedding for text B
+    resp_b = oai.embeddings.create(model="text-embedding-ada-002", input=b)
+    emb_b = resp_b.data[0].embedding
     return cosine_similarity(emb_a, emb_b)
 
 # --- Fetch via Crawl4AI ---
