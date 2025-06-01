@@ -12,18 +12,18 @@ from huggingface_hub import InferenceClient
 from uuid import uuid4
 
 # ─── 1) Supabase configuration ──────────────────────────────────────────────
-# Paste your Supabase URL and Service-Role Key directly here (or via env vars):
-SUPABASE_URL              = os.getenv("SUPABASE_URL")              # e.g. "https://yourproject.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")  # e.g. "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+# Paste your Supabase URL and Service-Role Key here or set via environment:
+SUPABASE_URL              = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # ─── 2) Hugging Face configuration (optional) ───────────────────────────────
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # set to a valid HF token with “inference” scope
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")
 if not HF_API_TOKEN:
-    print("[WARN] No HF_API_TOKEN set → will fall back to pure fuzzy matching.")
+    print("[WARN] No HF_API_TOKEN set → will only use fuzzy matching.")
     hf_client = None
 else:
     hf_client = InferenceClient(token=HF_API_TOKEN)
@@ -39,8 +39,8 @@ def fuzzy_similarity(a: str, b: str) -> float:
 
 async def get_semantic_score(a: str, b: str) -> float:
     """
-    Return cosine similarity between embeddings for `a` and `b`, using HuggingFace Inference. 
-    If hf_client is not configured or an error occurs, return -1.0 to signal “fallback to fuzzy only.”
+    Compute cosine similarity of embeddings via HF InferenceClient.
+    If HF is not configured or fails, return -1.0 to fall back to fuzzy only.
     """
     if not hf_client:
         return -1.0
@@ -63,7 +63,7 @@ async def get_semantic_score(a: str, b: str) -> float:
             return -1.0
         return dot / (norm_a * norm_b)
     except Exception as e:
-        print(f"[WARN] HF semantic error: {e} → falling back to fuzzy only.")
+        print(f"[WARN] HF semantic error: {e} → fallback to fuzzy only.")
         return -1.0
 
 async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
@@ -75,8 +75,7 @@ async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
 
 def extract_product_data(html: str) -> dict:
     """
-    Parse a product page’s HTML and return {"name": ..., "price": ...}.
-    Price is returned as an integer (Tomans).
+    Parse a Wiraa product page’s HTML and return {name, price}.
     """
     soup = BeautifulSoup(html, "html.parser")
     title_el = soup.select_one('h1[data-product="title"]')
@@ -91,9 +90,7 @@ def extract_product_data(html: str) -> dict:
 
 def extract_links(html: str, selector: str, base_url: str) -> list[str]:
     """
-    Given page HTML and a CSS selector (e.g. "a[href^='/category/']"),
-    return a deduplicated list of absolute URLs. If the href is relative,
-    prefix with base_url.
+    Given HTML and a CSS selector, return unique absolute URLs from those <a> tags.
     """
     soup = BeautifulSoup(html, "html.parser")
     results = []
@@ -112,7 +109,7 @@ async def main():
     crawler = AsyncWebCrawler()
     torob = Torob()
 
-    # 4.1) Fetch home page → categories
+    # 4.1) Fetch the home page and extract category URLs
     home_html = await fetch_page(crawler, base_url)
     if not home_html:
         print("[FATAL] Could not fetch the home page.")
@@ -127,42 +124,48 @@ async def main():
         if not cat_html:
             continue
 
-        # 4.2) Find all product URLs in this category
+        # 4.2) Extract all product URLs under that category
         product_urls = extract_links(cat_html, "a[href^='/product/']", base_url)
         print(f" → {len(product_urls)} products found in this category")
 
-        # 4.3) For each product page:
         for prod_url in product_urls:
             html = await fetch_page(crawler, prod_url)
             if not html:
                 continue
 
-            # 4.4) Parse product name & price
+            # 4.3) Extract name & price; compute slug as the URL path after "/product/"
             product = extract_product_data(html)
+            slug = prod_url.split("/product/", 1)[-1]
             product["url"] = prod_url
+            product["product_slug"] = slug
 
-            # 4.5) Upsert into "products" on_conflict="url"
+            # 4.4) Upsert into "products" table on_conflict="url"
             upsert_resp = supabase.table("products") \
-                                 .upsert(product, on_conflict="url") \
-                                 .execute()
+                                 .upsert(
+                                     {
+                                       "name": product["name"],
+                                       "price": product["price"],
+                                       "url": product["url"],
+                                       "product_slug": product["product_slug"],
+                                     },
+                                     on_conflict="url"
+                                 ).execute()
+
             if upsert_resp.data is None:
                 print(f"[ERROR] Supabase returned no data when upserting {product['name']}")
                 continue
 
-            print(f"  • Stored product: {product['name']}")
+            print(f"  • Stored product: {product['name']} (slug={slug})")
 
-            # 4.6) Fetch that product’s UUID (primary key) by matching its URL
-            fetch_id = supabase.table("products") \
-                               .select("id") \
-                               .eq("url", product["url"]) \
-                               .single() \
-                               .execute()
-            if fetch_id.data is None:
-                print(f"[ERROR] Could not fetch ID for URL={product['url']}")
-                continue
-            product_id = fetch_id.data["id"]
+            # 4.5) (Optionally) Retrieve product ID/UUID if you ever need it:
+            #    fetch_id = supabase.table("products") \
+            #                       .select("id") \
+            #                       .eq("product_slug", slug) \
+            #                       .single() \
+            #                       .execute()
+            #    product_id = fetch_id.data["id"]
 
-            # 4.7) Ask Torob for competitor results
+            # 4.6) Query Torob for competitor prices:
             try:
                 torob_resp = torob.search(q=product["name"], page=0)
                 torob_results = torob_resp.get("results", [])
@@ -170,25 +173,25 @@ async def main():
                 print(f"    ↳ Torob search failed for '{product['name']}': {e}")
                 continue
 
-            # 4.8) Score each Torob candidate by fuzzy + semantic
-            scored_candidates = []
+            # 4.7) Score each Torob candidate by fuzzy + semantic
+            scored = []
             for item in torob_results:
                 name1 = item.get("name1", "")
                 f_score = fuzzy_similarity(name1, product["name"])
                 s_score = await get_semantic_score(name1, product["name"])
                 final_score = f_score if s_score < 0 else max(f_score, s_score)
-                scored_candidates.append((final_score, f_score, s_score, item))
+                scored.append((final_score, f_score, s_score, item))
 
-            scored_candidates.sort(key=lambda x: x[0], reverse=True)
-            top_five = scored_candidates[:5]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_five = scored[:5]
 
-            # 4.9) If best_score < 0.5 → queue in review_queue (human-in-the-loop)
+            # 4.8) If best_score < 0.5 → insert into review_queue
             if top_five:
                 best_score, best_f, best_s, best_item = top_five[0]
                 if best_score < 0.5:
                     review_resp = supabase.table("review_queue").insert({
                         "id": str(uuid4()),
-                        "product_id": product_id,
+                        "product_slug": slug,
                         "candidate_name": best_item.get("name1", ""),
                         "candidate_shop": best_item.get("shop_text", ""),
                         "fuzzy_score": round(best_f, 4),
@@ -201,14 +204,14 @@ async def main():
                     else:
                         print(f"    [REVIEW] Queued '{best_item.get('name1','')}' (score={best_score:.3f})")
 
-            # 4.10) Insert top-3 “good enough” matches into competitor_prices
+            # 4.9) Insert the top‐3 matches into competitor_prices (on_conflict uses UNIQUE(product_slug, competitor_name))
             for idx, (final_score, f_sc, s_sc, item) in enumerate(top_five[:3]):
                 comp_price = item.get("price", 0)
                 raw_shop = (item.get("shop_text") or "").strip()
                 link_path = item.get("web_client_absolute_url") or item.get("more_info_url")
                 seller = raw_shop or "unknown"
 
-                # If “فروشگاه” appears, follow the Torob detail page to extract up to 3 shop names
+                # If “فروشگاه” appears, follow the detail page to extract up to 3 shop names
                 if "فروشگاه" in raw_shop and link_path:
                     detail_url = link_path if link_path.startswith("http") else "https://torob.com" + link_path
                     detail_html = await fetch_page(crawler, detail_url)
@@ -226,11 +229,11 @@ async def main():
 
                 comp_resp = supabase.table("competitor_prices") \
                                     .upsert({
-                                        "product_id": product_id,
+                                        "product_slug": slug,
                                         "competitor_name": seller,
                                         "competitor_price": comp_price
                                     },
-                                    on_conflict="product_id,competitor_name") \
+                                    on_conflict="product_slug,competitor_name") \
                                     .execute()
 
                 if comp_resp.data is None:
