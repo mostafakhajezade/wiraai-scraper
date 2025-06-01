@@ -1,15 +1,26 @@
 # crawler.py
+
 import os
 import re
 import json
 import asyncio
-import requests
+
 from difflib import SequenceMatcher
 from crawl4ai import AsyncWebCrawler
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from torob_integration.api import Torob
 from uuid import uuid4
+
+# ─── 0) Try to load a local sentence-transformers model ───────────────────────
+# If you don't have `sentence-transformers` installed, run:
+#    pip install sentence-transformers
+try:
+    from sentence_transformers import SentenceTransformer
+    _LOCAL_EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+except ImportError:
+    _LOCAL_EMBED_MODEL = None
+    print("[WARN] Could not import sentence-transformers → will fallback to fuzzy only.")
 
 # ─── 1) Supabase configuration ──────────────────────────────────────────────
 SUPABASE_URL              = os.getenv("SUPABASE_URL")
@@ -19,14 +30,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# ─── 2) Hugging Face configuration (optional) ───────────────────────────────
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-HF_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-if not HF_API_TOKEN:
-    print("[WARN] No HF_API_TOKEN set → will only use fuzzy matching.")
-    HF_API_TOKEN = None
-
-# ─── 3) Helper functions ─────────────────────────────────────────────────────
+# ─── 2) Helper functions ─────────────────────────────────────────────────────
 
 def persian_to_english_numbers(text: str) -> str:
     persian = "۰۱۲۳۴۵۶۷۸۹"
@@ -38,50 +42,24 @@ def fuzzy_similarity(a: str, b: str) -> float:
 
 def get_semantic_score(a: str, b: str) -> float:
     """
-    Call Hugging Face Inference API for embeddings → cosine similarity.
-    If HF_API_TOKEN is not set or any call fails, return -1.0 (fallback to fuzzy).
+    Compute cosine similarity of local embeddings via sentence-transformers.
+    If the local model is unavailable, return -1.0 to force a fuzzy-only fallback.
     """
-    if not HF_API_TOKEN:
+    if _LOCAL_EMBED_MODEL is None:
         return -1.0
 
-    headers = {
-        "Authorization": f"Bearer {HF_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
     try:
-        # 1) Get embedding for `a`
-        resp_a = requests.post(
-            f"https://api-inference.huggingface.co/embeddings/{HF_EMBEDDING_MODEL}",
-            headers=headers,
-            json={"inputs": [a]}
-        )
-        resp_a.raise_for_status()
-        emb_a = resp_a.json().get("embeddings", [None])[0]
-        if emb_a is None:
-            return -1.0
-
-        # 2) Get embedding for `b`
-        resp_b = requests.post(
-            f"https://api-inference.huggingface.co/embeddings/{HF_EMBEDDING_MODEL}",
-            headers=headers,
-            json={"inputs": [b]}
-        )
-        resp_b.raise_for_status()
-        emb_b = resp_b.json().get("embeddings", [None])[0]
-        if emb_b is None:
-            return -1.0
-
-        # 3) Compute cosine similarity
-        dot = sum(x*y for x, y in zip(emb_a, emb_b))
+        # Encode both strings in a single batch for slight speedup
+        embeddings = _LOCAL_EMBED_MODEL.encode([a, b], convert_to_tensor=False)
+        emb_a, emb_b = embeddings[0], embeddings[1]
+        dot = sum(x*y for x,y in zip(emb_a, emb_b))
         norm_a = sum(x*x for x in emb_a) ** 0.5
         norm_b = sum(y*y for y in emb_b) ** 0.5
         if norm_a == 0 or norm_b == 0:
             return -1.0
         return dot / (norm_a * norm_b)
-
     except Exception as e:
-        print(f"[WARN] HF semantic error: {e} → fallback to fuzzy only.")
+        print(f"[WARN] Local embedding error: {e} → falling back to fuzzy only.")
         return -1.0
 
 async def fetch_page(crawler: AsyncWebCrawler, url: str) -> str:
@@ -121,13 +99,13 @@ def extract_links(html: str, selector: str, base_url: str) -> list[str]:
             results.append(full)
     return results
 
-# ─── 4) Main crawler logic ───────────────────────────────────────────────────
+# ─── 3) Main crawler logic ───────────────────────────────────────────────────
 async def main():
     base_url = "https://wiraa.ir"
     crawler = AsyncWebCrawler()
     torob = Torob()
 
-    # 4.1) Fetch home page & extract category URLs
+    # 3.1) Fetch home page & extract category URLs
     home_html = await fetch_page(crawler, base_url)
     if not home_html:
         print("[FATAL] Could not fetch the home page.")
@@ -142,7 +120,7 @@ async def main():
         if not cat_html:
             continue
 
-        # 4.2) Extract all product URLs under that category
+        # 3.2) Extract all product URLs under that category
         product_urls = extract_links(cat_html, "a[href^='/product/']", base_url)
         print(f" → {len(product_urls)} products found in this category")
 
@@ -151,23 +129,22 @@ async def main():
             if not html:
                 continue
 
-            # 4.3) Extract name & price; compute slug (path after "/product/")
+            # 3.3) Extract name & price; compute slug (path after "/product/")
             product = extract_product_data(html)
             slug = prod_url.split("/product/", 1)[-1]
             product["url"] = prod_url
             product["product_slug"] = slug
 
-            # 4.4) Upsert into "products" (on_conflict="url")
-            upsert_resp = supabase.table("products") \
-                                 .upsert(
-                                     {
-                                       "name": product["name"],
-                                       "price": product["price"],
-                                       "url": product["url"],
-                                       "product_slug": product["product_slug"],
-                                     },
-                                     on_conflict="url"
-                                 ).execute()
+            # 3.4) Upsert into "products" (on_conflict="url")
+            upsert_resp = supabase.table("products").upsert(
+                {
+                    "name": product["name"],
+                    "price": product["price"],
+                    "url": product["url"],
+                    "product_slug": product["product_slug"],
+                },
+                on_conflict="url"
+            ).execute()
 
             if upsert_resp.data is None:
                 print(f"[ERROR] Supabase returned no data when upserting {product['name']}")
@@ -175,7 +152,7 @@ async def main():
 
             print(f"  • Stored product: {product['name']} (slug={slug})")
 
-            # 4.5) (Optional) retrieve the UUID if needed:
+            # 3.5) (Optional) retrieve the UUID if needed:
             # fetch_id = supabase.table("products") \
             #                    .select("id") \
             #                    .eq("product_slug", slug) \
@@ -183,7 +160,7 @@ async def main():
             #                    .execute()
             # product_id = fetch_id.data["id"]
 
-            # 4.6) Query Torob for competitor prices
+            # 3.6) Query Torob for competitor prices
             try:
                 torob_resp = torob.search(q=product["name"], page=0)
                 torob_results = torob_resp.get("results", [])
@@ -191,7 +168,7 @@ async def main():
                 print(f"    ↳ Torob search failed for '{product['name']}': {e}")
                 continue
 
-            # 4.7) Score each Torob candidate (fuzzy + semantic)
+            # 3.7) Score each Torob candidate (fuzzy + semantic)
             scored = []
             for item in torob_results:
                 name1 = item.get("name1", "")
@@ -203,7 +180,7 @@ async def main():
             scored.sort(key=lambda x: x[0], reverse=True)
             top_five = scored[:5]
 
-            # 4.8) If best_score < 0.5 → insert into review_queue for human review
+            # 3.8) If best_score < 0.5 → insert into review_queue for human review
             if top_five:
                 best_score, best_f, best_s, best_item = top_five[0]
                 if best_score < 0.5:
@@ -222,7 +199,7 @@ async def main():
                     else:
                         print(f"    [REVIEW] Queued '{best_item.get('name1','')}' (score={best_score:.3f})")
 
-            # 4.9) Upsert the top‐3 matches into competitor_prices
+            # 3.9) Upsert the top-3 matches into competitor_prices
             for idx, (final_score, f_sc, s_sc, item) in enumerate(top_five[:3]):
                 comp_price = item.get("price", 0)
                 raw_shop = (item.get("shop_text") or "").strip()
@@ -245,14 +222,14 @@ async def main():
                         if shops:
                             seller = ", ".join(shops)
 
-                comp_resp = supabase.table("competitor_prices") \
-                                    .upsert({
-                                        "product_slug": slug,
-                                        "competitor_name": seller,
-                                        "competitor_price": comp_price
-                                    },
-                                    on_conflict="product_slug,competitor_name") \
-                                    .execute()
+                comp_resp = supabase.table("competitor_prices").upsert(
+                    {
+                        "product_slug": slug,
+                        "competitor_name": seller,
+                        "competitor_price": comp_price
+                    },
+                    on_conflict="product_slug,competitor_name"
+                ).execute()
 
                 if comp_resp.data is None:
                     print(f"[WARN] Couldn’t upsert competitor_price '{seller}' for '{product['name']}'")
@@ -261,6 +238,6 @@ async def main():
 
     print("\n[Crawling Completed]")
 
-# ─── 5) Entry Point ───────────────────────────────────────────────────────────
+# ─── 4) Entry Point ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     asyncio.run(main())
