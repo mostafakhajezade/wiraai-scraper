@@ -46,11 +46,11 @@ async def get_semantic_score(a: str, b: str) -> float:
         return -1.0
 
     try:
-        resp_a = hf_client.text_embedding(
+        resp_a = hf_client.embeddings(
             model="sentence-transformers/all-MiniLM-L6-v2",
             inputs=[a]
         )
-        resp_b = hf_client.text_embedding(
+        resp_b = hf_client.embeddings(
             model="sentence-transformers/all-MiniLM-L6-v2",
             inputs=[b]
         )
