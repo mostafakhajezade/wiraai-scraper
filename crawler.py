@@ -183,7 +183,7 @@ async def main():
             # 3.8) If best_score < 0.5 → insert into review_queue for human review
             if top_five:
                 best_score, best_f, best_s, best_item = top_five[0]
-                if best_score < 0.5:
+                if best_score < 0.8:
                     review_resp = supabase.table("review_queue").insert({
                         "id": str(uuid4()),
                         "product_slug": slug,
