@@ -189,8 +189,8 @@ async def main():
                         "product_slug": slug,
                         "candidate_name": best_item.get("name1", ""),
                         "candidate_shop": best_item.get("shop_text", ""),
-                        "fuzzy_score": round(best_f, 4),
-                        "semantic_score": round(best_s, 4),
+                        "fuzzy_score": float(round(best_f, 4)),
+                        "semantic_score": float(round(best_s, 4)),
                         "raw_torob_data": json.dumps(best_item, ensure_ascii=False)
                     }).execute()
 
