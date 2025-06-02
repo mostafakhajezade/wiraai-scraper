@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -27,9 +27,9 @@
     "tailwindcss": "^4.1.8",
     "typescript": "^5"
   },
-  "description": "This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).",
+  "description": "Next.js app for human-in-the-loop review",
   "main": "index.js",
   "keywords": [],
-  "author": "",
+  "author": "mkhajezade@gmail.com",
   "license": "ISC"
 }
