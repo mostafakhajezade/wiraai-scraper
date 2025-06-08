@@ -27,7 +27,7 @@ export default function ReviewPage() {
       setLoading(true);
       const { data, error } = await supabase
         .from("review_queue")
-        .select<ReviewRow>("*")
+        .select("*")
         .eq("status", "pending"); // or remove .eq(...) if you don’t have status
       if (error) {
         setError(error.message);
