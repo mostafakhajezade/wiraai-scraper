@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase }                 from "@/lib/supabaseClient";
 
 type ReviewRow = {
   id: string;
@@ -11,16 +11,17 @@ type ReviewRow = {
   candidate_shop: string;
   fuzzy_score: number;
   semantic_score: number;
-  raw_torob_data: string;    // note: stored as JSON string
+  raw_torob_data: string;    // JSON-stringified Torob result
   status: string;
   created_at: string;
 };
 
 export default function ReviewPage() {
-  const [rows, setRows] = useState<ReviewRow[]>([]);
+  const [rows, setRows]     = useState<ReviewRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]     = useState<string | null>(null);
 
+  // ─── fetch the “pending” queue rows ────────────────────────────────────────
   useEffect(() => {
     async function fetchQueue() {
       setLoading(true);
@@ -28,8 +29,9 @@ export default function ReviewPage() {
         .from("review_queue")
         .select("*")
         .eq("status", "pending");
+
       if (error) setError(error.message);
-      else setRows(data || []);
+      else      setRows(data || []);
       setLoading(false);
     }
     fetchQueue();
@@ -78,21 +80,22 @@ export default function ReviewPage() {
     </main>
   );
 
-  // Approve with real price/url from raw_torob_data
+  // ── Approve: parse raw_torob_data for true price & URL ────────────────────
   async function handleApprove(row: ReviewRow) {
     let torob: any;
     try {
       torob = JSON.parse(row.raw_torob_data);
     } catch {
-      alert("Invalid raw data, cannot approve.");
+      alert("Invalid raw data — cannot approve.");
       return;
     }
-    const price = torob.price ?? 0;
-    const url   = torob.web_client_absolute_url 
-                || torob.more_info_url 
-                || "";
 
-    const { error: insertError } = await supabase
+    const price = torob.price ?? 0;
+    const url = torob.web_client_absolute_url
+              || torob.more_info_url
+              || "";
+
+    const { error: insertErr } = await supabase
       .from("competitor_prices")
       .insert([{
         product_slug:    row.product_slug,
@@ -100,34 +103,36 @@ export default function ReviewPage() {
         competitor_price: price,
         competitor_url:  url,
       }]);
-    if (insertError) {
-      alert("Error inserting competitor price: " + insertError.message);
+
+    if (insertErr) {
+      alert("Insert error: " + insertErr.message);
       return;
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateErr } = await supabase
       .from("review_queue")
       .update({ status: "resolved" })
       .eq("id", row.id);
-    if (updateError) {
-      alert("Error marking review done: " + updateError.message);
+
+    if (updateErr) {
+      alert("Couldn’t mark review done: " + updateErr.message);
       return;
     }
 
     setRows(prev => prev.filter(r => r.id !== row.id));
   }
 
-  // Correct: ask for shop, price, url
+  // ── Correct: ask for name, price & URL ────────────────────────────────────
   async function handleCorrect(row: ReviewRow) {
     const newName = prompt(
       `Correct shop name (was: ${row.candidate_name}):`
     );
     if (!newName) return;
 
-    const newPriceRaw = prompt("Enter the correct price:");
-    const newPrice = newPriceRaw ? parseInt(newPriceRaw, 10) : 0;
+    const rawPrice = prompt("Enter the correct price:");
+    const newPrice = rawPrice ? parseInt(rawPrice, 10) : 0;
 
-    const newUrl = prompt("Enter the product URL on Torob:");
+    const newUrl = prompt("Enter the correct Torob URL:");
 
     const { error: corrInsert } = await supabase
       .from("competitor_prices")
@@ -137,8 +142,9 @@ export default function ReviewPage() {
         competitor_price: newPrice,
         competitor_url:  newUrl || "",
       }]);
+
     if (corrInsert) {
-      alert("Error inserting corrected price: " + corrInsert.message);
+      alert("Error inserting corrected data: " + corrInsert.message);
       return;
     }
 
@@ -146,8 +152,9 @@ export default function ReviewPage() {
       .from("review_queue")
       .update({ status: "resolved" })
       .eq("id", row.id);
+
     if (corrUpdate) {
-      alert("Error updating review status: " + corrUpdate.message);
+      alert("Error marking review done: " + corrUpdate.message);
       return;
     }
 
