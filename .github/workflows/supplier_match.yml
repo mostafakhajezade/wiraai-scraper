@@ -2,7 +2,7 @@ name: 🤖 Match Supplier Offers
 
 on:
   schedule:
-    - cron: '5 * * * *'   # every hour at :05
+    - cron: '5 * * * *'   # 5 minutes past the hour, after ingest
   workflow_dispatch:
 
 jobs:
@@ -10,12 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with: python-version: '3.11'
-      - run: |
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
           cd supplier_ingest
-          pip install rapidfuzz supabase
-      - run: python matcher.py
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run matcher
         env:
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:  ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python supplier_ingest/matcher.py
