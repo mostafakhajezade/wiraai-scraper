@@ -1,0 +1,35 @@
+name: 🕑 Hourly Telegram Ingest
+
+on:
+  schedule:
+    - cron: '0 * * * *'    # every hour on the hour (UTC)
+  workflow_dispatch:      # also allow manual trigger
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd supplier_ingest
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run hourly ingest
+        env:
+          TELEGRAM_BOT_TOKEN:        ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHANNEL_ID:             ${{ secrets.TG_CHANNEL_ID }}
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cd supplier_ingest
+          python ingest.py
