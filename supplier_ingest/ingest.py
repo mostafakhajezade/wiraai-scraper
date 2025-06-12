@@ -12,10 +12,12 @@ import requests
 # ─── Configuration & Clients ─────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
+# Load environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# Validate configuration
 if not SUPABASE_URL or not SUPABASE_KEY:
     logging.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
     raise RuntimeError("Supabase credentials are required")
@@ -26,7 +28,7 @@ if not TELEGRAM_BOT_TOKEN:
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Base URL for Telegram Bot API
+# Telegram Bot API base URL
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 # ─── OCR & Text Helpers ──────────────────────────────────────────────────────
@@ -43,11 +45,14 @@ def normalize(text: str) -> str:
 # ─── Ingest State Helpers ─────────────────────────────────────────────────────
 
 def get_last_offset() -> int:
-    resp = supabase.table("ingest_state") \
-                   .select("offset_id") \
-                   .eq("id", "telegram_suppliers") \
-                   .single() \
-                   .execute()
+    resp = (
+        supabase
+        .table("ingest_state")
+        .select("offset_id")
+        .eq("id", "telegram_suppliers")
+        .single()
+        .execute()
+    )
     row = resp.data
     return int(row["offset_id"]) if row else 0
 
@@ -76,8 +81,11 @@ def queue_supplier(image_url: str, raw_text: str, extracted_name: str, supplier:
 def handle_telegram():
     last_offset = get_last_offset()
     params = {"offset": last_offset + 1, "timeout": 10}
+
     try:
-        response = requests.get(f"{TELEGRAM_API_URL}/getUpdates", params=params, timeout=20)
+        response = requests.get(
+            f"{TELEGRAM_API_URL}/getUpdates", params=params, timeout=20
+        )
         response.raise_for_status()
         data = response.json()
         updates = data.get("result", [])
@@ -86,33 +94,39 @@ def handle_telegram():
         return
 
     max_id = last_offset
-    for u in updates:
-        uid = u.get("update_id")
+    for update in updates:
+        uid = update.get("update_id")
         if uid is None:
             continue
         if uid > max_id:
             max_id = uid
-        msg = u.get("message") or u.get("channel_post")
+
+        # extract message object
+        msg = update.get("message") or update.get("channel_post")
         if not msg or not msg.get("photo"):
             continue
 
-        # Extract caption or text
-        caption = msg.get("caption") or msg.get("text") or ""
-        caption = caption.strip()
+        # caption or text
+        caption = (msg.get("caption") or msg.get("text") or "").strip()
 
-        # Get highest resolution photo file_id
+        # highest-resolution photo
         photo_list = msg.get("photo")
         file_id = photo_list[-1]["file_id"]
 
-        # Get file path
-        file_resp = requests.get(f"{TELEGRAM_API_URL}/getFile", params={"file_id": file_id})
+        # get file path
+        file_resp = requests.get(
+            f"{TELEGRAM_API_URL}/getFile", params={"file_id": file_id}
+        )
         file_resp.raise_for_status()
         file_path = file_resp.json().get("result", {}).get("file_path")
         if not file_path:
             continue
-        download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
 
-        # Download, OCR & queue
+        download_url = (
+            f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+        )
+
+        # download and process image
         try:
             dl = requests.get(download_url, stream=True, timeout=20)
             dl.raise_for_status()
@@ -134,6 +148,7 @@ def handle_telegram():
 
 def main():
     handle_telegram()
+
 
 if __name__ == "__main__":
     main()
