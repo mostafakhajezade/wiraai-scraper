@@ -2,14 +2,14 @@
 
 import os
 import logging
+import asyncio
 from uuid import uuid4
 from supabase import create_client, Client
-from telegram import Bot, Update
+from telegram import Bot
 from telegram.error import TelegramError
 from PIL import Image
 import pytesseract
 import tempfile
-import requests
 
 # ─── Configuration & Clients ─────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -38,6 +38,7 @@ def ocr_image(path: str) -> str:
     text = pytesseract.image_to_string(img, lang="eng+fas")
     return text.strip()
 
+
 def normalize(text: str) -> str:
     return " ".join(text.split())
 
@@ -51,6 +52,7 @@ def get_last_offset() -> int:
                    .execute()
     row = resp.data
     return int(row["offset_id"]) if row else 0
+
 
 def set_last_offset(offset: int):
     supabase.table("ingest_state").upsert({
@@ -76,27 +78,31 @@ def queue_supplier(image_path: str, raw_text: str, extracted_name: str, supplier
 def handle_telegram():
     last_offset = get_last_offset()
     try:
-        updates = bot.get_updates(offset=last_offset + 1, timeout=10)
+        # Use asyncio event loop to call async method
+        loop = asyncio.new_event_loop()
+        updates = loop.run_until_complete(
+            bot.get_updates(offset=last_offset + 1, timeout=10)
+        )
     except TelegramError as e:
         logging.error("Failed to fetch updates from Telegram: %s", e)
         return
+    finally:
+        loop.close()
 
     max_id = last_offset
-    for update in updates:
+    for update in updates or []:
         uid = update.update_id
         if uid > max_id:
             max_id = uid
-
         msg = update.message
         if not msg or not msg.photo:
             continue
 
         caption = (msg.caption or msg.text or "").strip()
-        # process highest resolution photo
         file_id = msg.photo[-1].file_id
-        file = bot.get_file(file_id)
+        tg_file = bot.get_file(file_id)
         with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
-            file.download(custom_path=tmp.name)
+            tg_file.download(custom_path=tmp.name)
             raw_text = ocr_image(tmp.name)
             name = normalize(f"{caption} {raw_text}")
             queue_supplier(tmp.name, raw_text, name, supplier="Telegram")
@@ -105,22 +111,11 @@ def handle_telegram():
         set_last_offset(max_id)
         logging.info(f"Updated last_offset → {max_id}")
 
-# ─── WhatsApp & Instagram stubs ───────────────────────────────────────────────
-
-def handle_whatsapp():
-    # TODO: implement Twilio polling or webhook processing
-    pass
-
-def handle_instagram():
-    # TODO: implement Instagram DM scraping or webhook
-    pass
-
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 def main():
-    handle_whatsapp()
     handle_telegram()
-    handle_instagram()
+
 
 if __name__ == "__main__":
     main()
