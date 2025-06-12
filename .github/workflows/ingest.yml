@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install python-telegram-bot supabase crawl4ai beautifulsoup4 torob-integration-api
+          pip install python-telegram-bot supabase crawl4ai beautifulsoup4 torob-integration
 
       - name: Run Telegram ingest
         env:
