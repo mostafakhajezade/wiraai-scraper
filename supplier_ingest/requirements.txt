@@ -1,5 +1,6 @@
+python-telegram-bot~=22.1
+Pillow
 pytesseract
-pillow
-python-telegram-bot      # or whichever libraries you need
-requests                 # for Instagram scraping or HTTP
-supabase                   # to write back into review_queue
+supabase
+requests
+rapidfuzz
