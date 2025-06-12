@@ -12,12 +12,11 @@ import requests
 # ─── Configuration & Clients ─────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-# Load environment variables
+# Environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Validate configuration
 if not SUPABASE_URL or not SUPABASE_KEY:
     logging.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
     raise RuntimeError("Supabase credentials are required")
@@ -83,12 +82,11 @@ def handle_telegram():
     params = {"offset": last_offset + 1, "timeout": 10}
 
     try:
-        response = requests.get(
+        resp = requests.get(
             f"{TELEGRAM_API_URL}/getUpdates", params=params, timeout=20
         )
-        response.raise_for_status()
-        data = response.json()
-        updates = data.get("result", [])
+        resp.raise_for_status()
+        updates = resp.json().get("result", [])
     except Exception as e:
         logging.error("Failed to fetch updates from Telegram: %s", e)
         return
@@ -101,24 +99,23 @@ def handle_telegram():
         if uid > max_id:
             max_id = uid
 
-        # extract message object
         msg = update.get("message") or update.get("channel_post")
         if not msg or not msg.get("photo"):
             continue
 
-        # caption or text
         caption = (msg.get("caption") or msg.get("text") or "").strip()
-
-        # highest-resolution photo
         photo_list = msg.get("photo")
         file_id = photo_list[-1]["file_id"]
 
-        # get file path
-        file_resp = requests.get(
-            f"{TELEGRAM_API_URL}/getFile", params={"file_id": file_id}
-        )
-        file_resp.raise_for_status()
-        file_path = file_resp.json().get("result", {}).get("file_path")
+        try:
+            file_resp = requests.get(
+                f"{TELEGRAM_API_URL}/getFile", params={"file_id": file_id}, timeout=20
+            )
+            file_resp.raise_for_status()
+            file_path = file_resp.json().get("result", {}).get("file_path")
+        except Exception:
+            continue
+
         if not file_path:
             continue
 
@@ -126,7 +123,6 @@ def handle_telegram():
             f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
         )
 
-        # download and process image
         try:
             dl = requests.get(download_url, stream=True, timeout=20)
             dl.raise_for_status()
