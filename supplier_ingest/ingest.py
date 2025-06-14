@@ -34,6 +34,12 @@ TELEGRAM_API_URL   = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 # instantiate EasyOCR once
 _reader = easyocr.Reader(["en", "fa"], gpu=False)
 
+# ─── Text Normalization ───────────────────────────────────────────────────────
+
+def normalize(text: str) -> str:
+    """Collapse runs of whitespace/newlines into single spaces."""
+    return " ".join(text.split())
+
 # ─── OCR / Preprocessing Helpers ───────────────────────────────────────────────
 
 def preprocess_img(img: np.ndarray) -> np.ndarray:
@@ -41,14 +47,12 @@ def preprocess_img(img: np.ndarray) -> np.ndarray:
     Upscale, grayscale, threshold and possibly invert the image
     to make text stand out for OCR.
     """
-    # upscale 
     img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(
         gray, 0, 255,
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
-    # invert if text is light on dark
     if thresh.mean() < 127:
         thresh = cv2.bitwise_not(thresh)
     return thresh
@@ -66,11 +70,9 @@ def ocr_band(img: np.ndarray, lang: str, psm: int) -> str:
     """
     processed = preprocess_img(img)
     pil_img   = Image.fromarray(processed)
-    # Tesseract
     config    = f"--oem 3 --psm {psm}"
     txt       = pytesseract.image_to_string(pil_img, lang=lang, config=config).strip()
     clean     = clean_text(txt)
-    # fallback
     if len(clean.split()) < 3:
         results = _reader.readtext(img)
         fallback = " ".join([r[1] for r in results])
@@ -92,22 +94,17 @@ def ocr_image(path: str) -> str:
     orig = cv2.imread(path)
     h, _ = orig.shape[:2]
 
-    # bands: top 20%, middle 60%, bottom 20%
     top    = orig[0:int(0.2*h), :]
     middle = orig[int(0.2*h):int(0.8*h), :]
     bottom = orig[int(0.8*h):, :]
 
-    # OCR each band
     t1 = ocr_band(top,    lang="eng+fas", psm=6)
     t2 = ocr_band(middle, lang="eng+fas", psm=6)
     t3 = ocr_band(bottom, lang="eng",      psm=6)
 
-    # catch the model code
     code = extract_model_code(" ".join([t1, t2, t3]))
-
-    # combine and normalize whitespace
     combined = " ".join(filter(None, [t1, t2, t3, code]))
-    return " ".join(combined.split())
+    return normalize(combined)
 
 # ─── Ingest State Helpers ─────────────────────────────────────────────────────
 
@@ -167,13 +164,15 @@ def handle_telegram():
         if not msg or not msg.get("photo"):
             continue
 
-        caption    = (msg.get("caption") or msg.get("text") or "").strip()
-        file_id    = msg["photo"][-1]["file_id"]
+        caption = normalize(msg.get("caption") or msg.get("text") or "")
+        file_id = msg["photo"][-1]["file_id"]
 
         # fetch file path
         try:
-            fr        = requests.get(f"{TELEGRAM_API_URL}/getFile",
-                                     params={"file_id": file_id}, timeout=30)
+            fr        = requests.get(
+                f"{TELEGRAM_API_URL}/getFile",
+                params={"file_id": file_id}, timeout=30
+            )
             fr.raise_for_status()
             file_path = fr.json()["result"]["file_path"]
         except Exception as e:
@@ -182,7 +181,6 @@ def handle_telegram():
 
         download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
 
-        # download, OCR & queue
         try:
             dl = requests.get(download_url, stream=True, timeout=30)
             dl.raise_for_status()
@@ -191,8 +189,8 @@ def handle_telegram():
                     tmp.write(chunk)
                 tmp.flush()
 
-                raw_text      = ocr_image(tmp.name)
-                full_name     = normalize(f"{caption} {raw_text}")
+                raw_text  = ocr_image(tmp.name)
+                full_name = normalize(f"{caption} {raw_text}")
                 queue_supplier(download_url, raw_text, full_name)
 
         except Exception as e:
