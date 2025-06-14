@@ -4,3 +4,6 @@ pytesseract
 supabase
 requests
 rapidfuzz
+opencv-python
+numpy
+easyocr
