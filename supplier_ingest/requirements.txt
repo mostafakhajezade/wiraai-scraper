@@ -7,3 +7,4 @@ rapidfuzz
 opencv-python
 numpy
 easyocr
+opencv-python
