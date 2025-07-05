@@ -8,3 +8,5 @@ opencv-python
 numpy
 easyocr
 opencv-python
+paddleocr
+paddlepaddle>=2.6.0  # CPU build
