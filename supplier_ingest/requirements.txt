@@ -10,3 +10,5 @@ easyocr
 opencv-python
 paddleocr
 paddlepaddle>=2.6.0  # CPU build
+transformers>=4.30.0
+torch  # CPU build or GPU if you have one
