@@ -83,7 +83,7 @@ def ocr_band(img: np.ndarray, psm: int) -> str:
         res = _reader_en.readtext(img)
         out = clean_eng(" ".join(r[1] for r in res))
     if len(out.split()) < 2:
-        paddle_res = _paddle_ocr.ocr(img)
+        paddle_res = _paddle_ocr.predict(img)
         paddle_txt = " ".join(line[1][0] for block in paddle_res for line in block)
         out = clean_eng(paddle_txt)
     return out
